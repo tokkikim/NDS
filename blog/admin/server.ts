@@ -53,6 +53,7 @@ type Job = {
   status: "running" | "done" | "failed";
   log: string;
   startedAt: string;
+  finishedAt?: string;
   /** 시장분석 작업이 다루는 주제들 (같은 주제를 동시에 두 번 분석하지 않도록) */
   topics?: string[];
 };
@@ -80,6 +81,7 @@ function startJob(kind: string, label: string, script: string, args: string[], t
     job.log += `\n[실행 실패] ${err.message}`;
   });
   child.on("close", (code) => {
+    job.finishedAt = new Date().toISOString();
     job.status = code === 0 ? "done" : "failed";
     job.log += `\n[종료 코드 ${code}]`;
   });

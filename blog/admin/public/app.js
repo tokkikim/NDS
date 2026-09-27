@@ -73,6 +73,12 @@ const topicColor = (slug) => state.topics.find((t) => t.slug === slug)?.color ??
 
 // ── 작업(백그라운드) ───────────────────────────────────────────────────────
 
+/** 작업 경과 시간 (예: 3분 12초) */
+function elapsedText(j) {
+  const sec = Math.max(0, Math.round(((j.finishedAt ? Date.parse(j.finishedAt) : Date.now()) - Date.parse(j.startedAt)) / 1000));
+  return sec < 60 ? `${sec}초` : `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+}
+
 function watchJob(job) {
   state.watching.add(job.id);
   toast(`작업 시작: ${job.label}`);
@@ -90,7 +96,13 @@ async function renderJobs() {
       h(
         "div",
         { class: "job", onclick: () => showJob(j.id) },
-        h("div", { class: "row" }, h("span", { class: `badge ${j.status === "done" ? "b-go" : j.status === "failed" ? "b-no" : "b-hold"}` }, { running: "실행 중", done: "완료", failed: "실패" }[j.status]), j.label),
+        h(
+          "div",
+          { class: "row" },
+          h("span", { class: `badge ${j.status === "done" ? "b-go" : j.status === "failed" ? "b-no" : "b-hold"}` }, { running: "실행 중", done: "완료", failed: "실패" }[j.status]),
+          j.label,
+          h("span", { class: "muted small" }, elapsedText(j)),
+        ),
         h("pre", {}, j.tail.split("\n").slice(-3).join("\n")),
       ),
     ),
