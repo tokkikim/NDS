@@ -1,7 +1,7 @@
 import { SITE } from "@/blog.config";
 import { getPublishedPosts } from "@/lib/posts";
 
-export const revalidate = 3600;
+export const dynamic = "force-static";
 
 function escapeXml(s: string): string {
   return s.replace(/[<>&'"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" })[c]!);

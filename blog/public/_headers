@@ -1,0 +1,5 @@
+# Cloudflare Pages 응답 헤더. 확장자 없는 썸네일 파일을 이미지로 인식시킵니다.
+/opengraph-image
+  Content-Type: image/png
+/posts/*/opengraph-image
+  Content-Type: image/png

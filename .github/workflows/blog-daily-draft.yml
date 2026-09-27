@@ -1,5 +1,6 @@
-# 매일 아침 오늘의 공부노트 초안을 만들어 PR로 올립니다.
+# (선택) 매일 아침 Claude CLI로 오늘의 공부노트 초안을 만들어 PR로 올립니다.
 # PR에서 "직접 해보기"를 채우고 draft: false로 바꾼 뒤 merge하면 게시됩니다.
+# CLAUDE_CODE_OAUTH_TOKEN 시크릿(로컬에서 `claude setup-token`으로 발급)이 없으면 빈 템플릿으로 PR을 만듭니다.
 name: Blog daily draft
 
 on:
@@ -44,13 +45,14 @@ jobs:
       - name: 초안 생성
         if: steps.today.outputs.exists != 'true'
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           SUBJECT: ${{ github.event.inputs.subject }}
         run: |
-          if [ -n "$ANTHROPIC_API_KEY" ]; then
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then
+            npm install -g @anthropic-ai/claude-code
             if [ -n "$SUBJECT" ]; then npm run draft -- --subject "$SUBJECT"; else npm run draft; fi
           else
-            echo "ANTHROPIC_API_KEY 시크릿이 없어 빈 템플릿을 만듭니다."
+            echo "CLAUDE_CODE_OAUTH_TOKEN 시크릿이 없어 빈 템플릿을 만듭니다."
             npm run new
           fi
 
@@ -65,9 +67,8 @@ jobs:
             오늘의 공부노트 초안입니다. 게시하려면:
 
             - [ ] "직접 해보기" 섹션에 실제로 해본 내용 쓰기
+            - [ ] 이미지 제안 메모가 있으면 스크린샷을 `public/images/posts/<글 파일명>/`에 넣기 (선택)
             - [ ] 본문 사실·수치와 참고 자료 링크 확인
             - [ ] 남은 `<!-- TODO` 주석 지우기
             - [ ] `draft: false`로 바꾸기
-
-            검사(Blog CI)를 통과하면 merge해 주세요.
           labels: blog-draft

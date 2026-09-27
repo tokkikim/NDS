@@ -4,7 +4,6 @@ import { getTopic, TOPICS } from "@/blog.config";
 import { PostCard } from "@/components/PostCard";
 import { getPostsByTopic } from "@/lib/posts";
 
-export const revalidate = 3600;
 export const dynamicParams = false;
 
 type Props = { params: Promise<{ topic: string }> };

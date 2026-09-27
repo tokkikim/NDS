@@ -4,9 +4,6 @@ import { PostCard } from "@/components/PostCard";
 import { StudyCalendar } from "@/components/StudyCalendar";
 import { getPublishedPosts, getStreak } from "@/lib/posts";
 
-// 예약한 글이 게시일이 되면 나타나도록 1시간마다 다시 생성합니다.
-export const revalidate = 3600;
-
 export default function Home() {
   const posts = getPublishedPosts();
   const streak = getStreak(posts);

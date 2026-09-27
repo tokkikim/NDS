@@ -6,14 +6,15 @@ import { AdSlot } from "@/components/AdSlot";
 import { TopicBadge } from "@/components/PostCard";
 import { formatKoreanDate } from "@/lib/dates";
 import { renderMarkdown } from "@/lib/markdown";
-import { getAdjacentPosts, getPost, getPublishedPosts } from "@/lib/posts";
+import { getAdjacentPosts, getPost, getStaticSlugs } from "@/lib/posts";
 
-export const revalidate = 3600;
+// 정적 빌드: 빌드 시점에 게시된 글만 페이지로 만듭니다.
+export const dynamicParams = false;
 
 type Props = { params: Promise<{ slug: string }> };
 
 export function generateStaticParams() {
-  return getPublishedPosts().map((p) => ({ slug: p.slug }));
+  return getStaticSlugs();
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {

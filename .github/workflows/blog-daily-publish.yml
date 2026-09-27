@@ -1,0 +1,23 @@
+# 매일 자정(KST) 직후 Cloudflare Pages를 다시 빌드해서, 날짜가 된 예약 글을 공개합니다.
+# 정적 사이트라 빌드할 때만 글 목록이 바뀌기 때문에 필요합니다. (무료)
+# CF_PAGES_DEPLOY_HOOK 시크릿: Cloudflare Pages → 프로젝트 → Settings → Builds → Deploy hooks 에서 발급
+name: Blog daily publish
+
+on:
+  schedule:
+    - cron: "5 15 * * *" # 매일 00:05 KST
+  workflow_dispatch:
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cloudflare Pages 재빌드 요청
+        env:
+          HOOK: ${{ secrets.CF_PAGES_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "CF_PAGES_DEPLOY_HOOK 시크릿이 없어 건너뜁니다."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK"

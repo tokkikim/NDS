@@ -5,6 +5,8 @@ import { getTopic } from "../blog.config";
 import { addDays, todayString } from "./dates";
 
 export const POSTS_DIR = path.join(process.cwd(), "content", "posts");
+/** 글 이미지는 public/images/posts/<글 파일명>/ 에 넣고 본문에서 /images/posts/... 로 불러옵니다. */
+export const PUBLIC_DIR = path.join(process.cwd(), "public");
 
 /** 사람이 직접 채워야 하는 곳에 남기는 표시. 이 표시가 남은 글은 게시되지 않습니다. */
 export const TODO_MARKER = "<!-- TODO";
@@ -74,6 +76,13 @@ export function getPublishedPosts(): Post[] {
     .sort((a, b) => (a.date === b.date ? b.slug.localeCompare(a.slug) : b.date.localeCompare(a.date)));
 }
 
+/** 정적 빌드용 글 경로 목록. 게시된 글이 하나도 없으면 Next.js 정적 빌드가 실패해서 빈 자리 하나를 넣습니다. */
+export const PLACEHOLDER_SLUG = "_none";
+export function getStaticSlugs(): { slug: string }[] {
+  const slugs = getPublishedPosts().map((p) => ({ slug: p.slug }));
+  return slugs.length ? slugs : [{ slug: PLACEHOLDER_SLUG }];
+}
+
 export function getPost(slug: string): Post | undefined {
   return getPublishedPosts().find((p) => p.slug === slug);
 }
@@ -110,6 +119,17 @@ export function validatePost(post: Post): string[] {
   if (!post.summary) errors.push("summary(검색 결과에 보일 요약)가 비어 있습니다");
   if (post.summary.length > 160) errors.push("summary는 160자 이하로 써주세요");
 
+  for (const { alt, src } of extractImages(post.content)) {
+    if (!alt.trim()) errors.push(`이미지 설명(alt)이 비어 있습니다: ${src}`);
+    if (/^https?:\/\//.test(src)) {
+      errors.push(`외부 이미지는 저작권 문제로 쓰지 않습니다. public/images/posts/${post.slug}/ 에 직접 만든 이미지를 넣어주세요: ${src}`);
+    } else if (!src.startsWith("/")) {
+      errors.push(`이미지 경로는 /images/posts/${post.slug}/ 처럼 /로 시작해야 합니다: ${src}`);
+    } else if (!fs.existsSync(path.join(PUBLIC_DIR, decodeURI(src)))) {
+      errors.push(`이미지 파일이 없습니다: public${src}`);
+    }
+  }
+
   if (!post.draft) {
     if (post.content.includes(TODO_MARKER)) {
       errors.push("아직 채우지 않은 TODO 표시가 남아 있습니다");
@@ -125,6 +145,15 @@ export function validatePost(post: Post): string[] {
     }
   }
   return errors;
+}
+
+/** 본문의 마크다운 이미지 ![설명](경로) 목록. 작성용 메모(HTML 주석) 안의 것은 제외합니다. */
+export function extractImages(content: string): { alt: string; src: string }[] {
+  const visible = content.replace(/<!--[\s\S]*?-->/g, "");
+  return [...visible.matchAll(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g)].map((m) => ({
+    alt: m[1],
+    src: m[2],
+  }));
 }
 
 function sectionBody(content: string, heading: string): string | undefined {

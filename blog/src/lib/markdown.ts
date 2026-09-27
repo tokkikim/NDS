@@ -17,10 +17,15 @@ const marked = new Marked({
         : "noopener";
       return `<a href="${href}"${titleAttr} target="_blank" rel="${rel}">${text}</a>`;
     },
+    image({ href, title, text }) {
+      const titleAttr = title ? ` title="${title}"` : "";
+      return `<img src="${href}" alt="${text}"${titleAttr} loading="lazy" decoding="async">`;
+    },
   },
 });
 
 /** 글 본문 마크다운을 HTML로 변환합니다. 본문은 운영자가 검토한 콘텐츠만 들어옵니다. */
 export function renderMarkdown(content: string): string {
-  return marked.parse(content, { async: false });
+  // "이미지 제안" 같은 작성용 메모(HTML 주석)는 페이지에 내보내지 않습니다.
+  return marked.parse(content.replace(/<!--[\s\S]*?-->/g, ""), { async: false });
 }

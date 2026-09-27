@@ -3,7 +3,7 @@ import path from "node:path";
 import matter from "gray-matter";
 import { getTopic, TOPICS, type Topic } from "../src/blog.config";
 import { todayString, topicForDate } from "../src/lib/dates";
-import { EXPERIENCE_HEADING, POSTS_DIR, TODO_MARKER, type Source } from "../src/lib/posts";
+import { POSTS_DIR, TODO_MARKER, type Source } from "../src/lib/posts";
 
 /** --key value 형태의 명령줄 인자를 읽습니다. */
 export function parseArgs(argv = process.argv.slice(2)): Record<string, string> {
@@ -61,14 +61,6 @@ export function experiencePlaceholder(prompts: string[]): string {
     "-->",
   ].join("\n");
 }
-
-export const SECTION_HEADINGS = [
-  "## 오늘 공부한 것",
-  "## 핵심 정리",
-  EXPERIENCE_HEADING,
-  "## 헷갈렸던 점",
-  "## 다음에 공부할 것",
-] as const;
 
 export function fail(message: string): never {
   console.error(`✖ ${message}`);

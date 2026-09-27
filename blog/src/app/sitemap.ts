@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { SITE, TOPICS } from "@/blog.config";
 import { getPublishedPosts } from "@/lib/posts";
 
-export const revalidate = 3600;
+export const dynamic = "force-static";
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const posts = getPublishedPosts();
