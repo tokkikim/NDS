@@ -1,0 +1,29 @@
+# 블로그 글이나 코드가 바뀌면 글 검사, 린트, 빌드를 실행합니다.
+name: Blog CI
+
+on:
+  pull_request:
+    paths: ["blog/**", ".github/workflows/blog-*.yml"]
+  push:
+    branches: [main]
+    paths: ["blog/**"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blog
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blog/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      # build 전에 npm run check(글 검사)가 자동으로 실행됩니다.
+      - run: npm run build

@@ -12,8 +12,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // 블로그는 blog/ 안에서 따로 린트합니다.
-    "blog/**",
   ]),
 ]);
 

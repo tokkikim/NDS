@@ -1,0 +1,73 @@
+# 매일 아침 오늘의 공부노트 초안을 만들어 PR로 올립니다.
+# PR에서 "직접 해보기"를 채우고 draft: false로 바꾼 뒤 merge하면 게시됩니다.
+name: Blog daily draft
+
+on:
+  schedule:
+    - cron: "0 21 * * *" # 매일 06:00 KST
+  workflow_dispatch:
+    inputs:
+      subject:
+        description: "오늘 공부할 소재 (비우면 AI가 이전 글을 보고 고릅니다)"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: blog
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: blog/package-lock.json
+
+      - run: npm ci
+
+      - name: 오늘 글이 이미 있는지 확인
+        id: today
+        run: |
+          TODAY=$(TZ=Asia/Seoul date +%F)
+          echo "date=$TODAY" >> "$GITHUB_OUTPUT"
+          if ls content/posts/"$TODAY"-*.md >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 초안 생성
+        if: steps.today.outputs.exists != 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUBJECT: ${{ github.event.inputs.subject }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            if [ -n "$SUBJECT" ]; then npm run draft -- --subject "$SUBJECT"; else npm run draft; fi
+          else
+            echo "ANTHROPIC_API_KEY 시크릿이 없어 빈 템플릿을 만듭니다."
+            npm run new
+          fi
+
+      - name: PR 생성
+        if: steps.today.outputs.exists != 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: blog/draft-${{ steps.today.outputs.date }}
+          commit-message: "blog: ${{ steps.today.outputs.date }} 공부노트 초안"
+          title: "📝 ${{ steps.today.outputs.date }} 공부노트 초안"
+          body: |
+            오늘의 공부노트 초안입니다. 게시하려면:
+
+            - [ ] "직접 해보기" 섹션에 실제로 해본 내용 쓰기
+            - [ ] 본문 사실·수치와 참고 자료 링크 확인
+            - [ ] 남은 `<!-- TODO` 주석 지우기
+            - [ ] `draft: false`로 바꾸기
+
+            검사(Blog CI)를 통과하면 merge해 주세요.
+          labels: blog-draft
