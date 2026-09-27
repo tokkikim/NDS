@@ -188,6 +188,76 @@ const koreanDate = (date) => {
   return `${y}년 ${m}월 ${d}일 (${weekday(date)})`;
 };
 
+/** 기록 입력칸: 내용에 맞춰 높이가 늘어납니다. */
+function autoGrow(el) {
+  const fit = () => {
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + 2}px`;
+  };
+  el.addEventListener("input", fit);
+  requestAnimationFrame(fit);
+  return el;
+}
+
+/** 입력이 멈추면 저장 (입력할 때마다 저장하지 않도록) */
+function debounce(fn, ms = 700) {
+  let timer;
+  return (...a) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...a), ms);
+  };
+}
+
+const minutesText = (m) => (m >= 60 ? `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}` : `${m}분`);
+
+const startGuide = (body) =>
+  run(async () => {
+    watchJob(await api("/api/guide/generate", { method: "POST", body }));
+    render(true);
+  });
+
+/** 가이드 전체 보기 (준비물·단계 설명·주의할 점·완료 기준·출처) */
+function openGuide(t, onToggle) {
+  const g = t.guide;
+  const section = (title, ...children) => h("section", { class: "guide-section" }, h("h4", {}, title), ...children);
+  const steps = h("ol", { class: "guide-steps full" });
+  const drawSteps = () =>
+    steps.replaceChildren(
+      ...g.steps.map((st, i) =>
+        h(
+          "li",
+          { class: t.steps.includes(i) ? "is-checked" : "" },
+          h("label", {}, h("input", { type: "checkbox", checked: t.steps.includes(i), onchange: () => (onToggle(i), drawSteps()) }), h("strong", {}, st.title)),
+          st.detail ? h("p", {}, st.detail) : null,
+        ),
+      ),
+    );
+  drawSteps();
+  modal(
+    `${t.topic.name} · ${t.day}/${t.days}일차 가이드`,
+    h(
+      "div",
+      { class: "guide-full" },
+      h("div", { class: "task big-task" }, t.task),
+      h("div", { class: "row small muted" }, h("span", {}, `⏱ 약 ${minutesText(g.minutes)}`), t.lesson ? h("span", {}, `레슨 ${t.lesson.number}/${t.lesson.total} · ${t.lesson.title}`) : null),
+      g.why ? h("p", { class: "guide-why" }, g.why) : null,
+      g.prepare.length ? section("준비물", h("ul", {}, ...g.prepare.map((x) => h("li", {}, x)))) : null,
+      section("따라 하기", steps),
+      g.pitfalls.length ? section("⚠ 처음 하는 사람이 자주 하는 실수", h("ul", {}, ...g.pitfalls.map((x) => h("li", {}, x)))) : null,
+      g.doneWhen ? section("✅ 이 정도면 오늘은 완료", h("p", {}, g.doneWhen)) : null,
+      g.record.length ? section("📝 해보면서 기록할 것", h("ul", {}, ...g.record.map((x) => h("li", {}, x))), h("p", { class: "small muted" }, "답은 오늘 카드의 기록칸에 쓰면 글의 \"직접 해보기\"에 들어갑니다.")) : null,
+      g.sources.length ? section("참고", h("ul", {}, ...g.sources.map((x) => h("li", {}, h("a", { href: x.url, target: "_blank", rel: "noopener" }, x.title))))) : null,
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "ghost small", onclick: () => confirm("이 레슨의 가이드를 다시 만들까요? (1~3분)") && (document.getElementById("modal").close(), startGuide({ topic: t.topic.slug, lesson: t.lesson.id, force: true })) }, "가이드 다시 만들기"),
+      ),
+    ),
+  );
+  // 닫으면 카드에 체크 상태를 반영합니다.
+  document.getElementById("modal").addEventListener("close", () => render(true), { once: true });
+}
+
 async function renderToday() {
   state.date ??= kstToday();
   const v = await api(`/api/today?date=${state.date}`);
@@ -197,6 +267,8 @@ async function renderToday() {
   const progress = h("div", { class: "progress big-progress" }, h("span", { style: `width:${(doneCount / Math.max(1, v.tasks.length)) * 100}%` }));
   const counter = h("strong", {}, `${doneCount}/${v.tasks.length}`);
   const streak = h("span", {}, `🔥 연속 실천 ${v.streak}일`);
+  const totalMinutes = v.tasks.reduce((n, t) => n + (t.guide?.minutes ?? 0), 0);
+  const missingGuides = v.tasks.filter((t) => t.lesson && (!t.guide || t.guideStale) && !t.guideGenerating).length;
 
   const refreshHeader = () => {
     const n = v.tasks.filter((t) => t.done).length;
@@ -205,32 +277,142 @@ async function renderToday() {
   };
   const saveEntry = (t) =>
     run(async () => {
-      const r = await api("/api/daily", { method: "PUT", body: { date: v.date, topic: t.topic.slug, done: t.done, note: t.note } });
+      const r = await api("/api/daily", { method: "PUT", body: { date: v.date, topic: t.topic.slug, done: t.done, note: t.note, steps: t.steps, answers: t.answers } });
       streak.textContent = `🔥 연속 실천 ${r.streak}일`;
     });
 
   const card = (t) => {
-    const check = h(
-      "button",
-      {
-        class: `check${t.done ? " is-done" : ""}`,
-        onclick: () => {
-          t.done = !t.done;
-          check.classList.toggle("is-done", t.done);
-          check.textContent = t.done ? "✔ 완료" : "완료 체크";
-          cardEl.classList.toggle("is-done", t.done);
-          refreshHeader();
-          saveEntry(t);
-        },
-      },
-      t.done ? "✔ 완료" : "완료 체크",
-    );
-    const note = h("textarea", {
-      rows: 2,
-      value: t.note,
-      placeholder: "오늘 해본 것·기록·느낀 점 (글의 \"직접 해보기\" 재료가 됩니다)",
-      onchange: (e) => ((t.note = e.target.value), saveEntry(t)),
+    // 커리큘럼이 없는 카테고리: 할 일 대신 커리큘럼을 만들러 가는 안내
+    if (!t.lesson) {
+      return h(
+        "div",
+        { class: "card today-card", style: `border-top: 5px solid ${t.topic.color}` },
+        h("strong", { style: `color:${t.topic.color}` }, t.topic.name),
+        h("div", { class: "muted" }, "아직 커리큘럼이 없어서 매일 할 일이 없어요. 커리큘럼을 만들면 레슨마다 할 일과 가이드가 생깁니다."),
+        h("button", { class: "primary", onclick: () => ((state.curTopic = t.topic.slug), go("curriculum")) }, "커리큘럼 만들러 가기"),
+      );
+    }
+    const g = t.guide;
+    const saveSoon = debounce(() => saveEntry(t));
+    const cardEl = h("div", { class: `card today-card${t.done ? " is-done" : ""}`, style: `border-top: 5px solid ${t.topic.color}` });
+
+    // ── 완료 체크 ──
+    const check = h("button", { class: "check" });
+    const drawCheck = () => {
+      const allSteps = g && t.steps.length >= g.steps.length;
+      check.className = `check${t.done ? " is-done" : allSteps ? " is-ready" : ""}`;
+      check.textContent = t.done ? "✔ 완료" : allSteps ? "모든 단계 끝! 완료 체크" : "완료 체크";
+      cardEl.classList.toggle("is-done", t.done);
+    };
+    check.addEventListener("click", () => {
+      t.done = !t.done;
+      cardEl.classList.remove("is-open");
+      drawCheck();
+      refreshHeader();
+      saveEntry(t);
     });
+
+    // ── 가이드: 단계 체크리스트 ──
+    const stepCount = h("span", { class: "small muted" });
+    const stepBar = h("div", { class: "progress step-progress" }, h("span", { style: `background:${t.topic.color}` }));
+    const stepList = h("ol", { class: "guide-steps" });
+    let openStep = null;
+    const toggleStep = (i) => {
+      t.steps = t.steps.includes(i) ? t.steps.filter((x) => x !== i) : [...t.steps, i].sort((a, b) => a - b);
+      openStep = null;
+      drawSteps();
+      drawCheck();
+      saveEntry(t);
+    };
+    const drawSteps = () => {
+      if (!g) return;
+      const n = t.steps.filter((i) => i < g.steps.length).length;
+      stepCount.textContent = `따라 하기 ${n}/${g.steps.length}`;
+      stepBar.firstChild.style.width = `${(n / g.steps.length) * 100}%`;
+      // 아직 안 한 첫 단계의 설명을 펼쳐 둡니다 (지금 할 일에 집중).
+      const current = g.steps.findIndex((_, i) => !t.steps.includes(i));
+      stepList.replaceChildren(
+        ...g.steps.map((st, i) => {
+          const checked = t.steps.includes(i);
+          const expanded = openStep === null ? i === current : openStep === i;
+          return h(
+            "li",
+            { class: `${checked ? "is-checked" : ""}${i === current ? " is-current" : ""}` },
+            h(
+              "div",
+              { class: "step-row" },
+              h("input", { type: "checkbox", checked, "aria-label": st.title, onchange: () => toggleStep(i) }),
+              h("button", { class: "step-title", onclick: () => ((openStep = expanded ? -1 : i), drawSteps()) }, st.title),
+            ),
+            expanded && st.detail ? h("p", { class: "step-detail" }, st.detail) : null,
+          );
+        }),
+      );
+    };
+    drawSteps();
+
+    const guideArea = g
+      ? h(
+          "div",
+          { class: "guide-area" },
+          t.guideStale
+            ? h("div", { class: "notice small" }, "커리큘럼이 바뀌어 가이드가 오늘 할 일과 다를 수 있어요. ", h("button", { class: "link", onclick: () => startGuide({ topic: t.topic.slug, lesson: t.lesson.id, force: true }) }, "다시 만들기"))
+            : null,
+          g.why ? h("div", { class: "guide-why small" }, g.why) : null,
+          g.prepare.length ? h("div", { class: "small muted" }, `준비: ${g.prepare.join(" · ")}`) : null,
+          h("div", { class: "row", style: "justify-content:space-between" }, stepCount, h("button", { class: "link small", onclick: () => openGuide(t, toggleStep) }, "📖 가이드 크게 보기")),
+          stepBar,
+          stepList,
+          g.pitfalls.length ? h("details", { class: "small" }, h("summary", { class: "muted" }, `⚠ 자주 하는 실수 ${g.pitfalls.length}개`), h("ul", {}, ...g.pitfalls.map((x) => h("li", {}, x)))) : null,
+          g.doneWhen ? h("div", { class: "done-when small" }, "✅ ", g.doneWhen) : null,
+        )
+      : t.lesson
+        ? h(
+            "div",
+            { class: "guide-area guide-empty" },
+            t.guideGenerating
+              ? h("div", { class: "muted small" }, "⏳ 가이드를 만드는 중이에요 (1~3분). 끝나면 여기에 단계가 나타납니다.")
+              : h(
+                  "button",
+                  { class: "guide-make", onclick: () => startGuide({ topic: t.topic.slug, lesson: t.lesson.id }) },
+                  h("strong", {}, "📘 처음이라면: 단계별 가이드 만들기"),
+                  h("span", { class: "small muted" }, "준비물 · 따라 할 단계 · 자주 하는 실수 · 기록할 것 (1~3분)"),
+                ),
+          )
+        : null;
+
+    // ── 기록: 가이드의 질문 + 자유 메모 → 글의 "직접 해보기" 재료 ──
+    const questions = [...new Set([...(g?.record ?? []), ...Object.keys(t.answers)])];
+    const recordArea = h(
+      "div",
+      { class: "record-area" },
+      h("div", { class: "small muted" }, "📝 기록 — 글의 \"직접 해보기\"에 들어갑니다"),
+      ...questions.map((q) =>
+        h(
+          "label",
+          { class: "record-q" },
+          h("span", { class: "small" }, q),
+          autoGrow(
+            h("textarea", {
+              rows: 1,
+              value: t.answers[q] ?? "",
+              placeholder: "숫자·비교·느낌을 짧게",
+              oninput: (e) => ((t.answers = { ...t.answers, [q]: e.target.value }), saveSoon()),
+            }),
+          ),
+        ),
+      ),
+      autoGrow(
+        h("textarea", {
+          rows: questions.length ? 1 : 2,
+          value: t.note,
+          placeholder: questions.length ? "그 밖에 해본 것·느낀 점" : "오늘 해본 것·기록·느낀 점",
+          oninput: (e) => ((t.note = e.target.value), saveSoon()),
+        }),
+      ),
+    );
+
+    const answered = questions.filter((q) => t.answers[q]?.trim()).length + (t.note?.trim() ? 1 : 0);
     const postArea = t.isPostDay
       ? h(
           "div",
@@ -243,23 +425,41 @@ async function renderToday() {
                 { class: "row" },
                 h("button", { class: "primary", onclick: () => createDraft({ date: v.date, topic: t.topic.slug }) }, "AI 초안 만들기"),
                 h("button", { class: "ghost", onclick: () => createDraft({ date: v.date, topic: t.topic.slug, mode: "template" }) }, "빈 템플릿"),
-                h("span", { class: "muted small" }, "이 레슨 기간의 메모가 초안에 들어갑니다"),
+                h("span", { class: "muted small" }, "이 레슨 기간의 기록과 가이드가 초안에 들어갑니다. 기록을 먼저 남기면 글이 좋아져요."),
               ),
         )
       : t.postDate
         ? h("div", { class: "muted small" }, `✍ 이 레슨 글은 ${t.postDate.slice(5).replace("-", "/")} (${weekday(t.postDate)})에 씁니다`)
         : null;
 
-    const cardEl = h(
-      "div",
-      { class: `card today-card${t.done ? " is-done" : ""}`, style: `border-top: 5px solid ${t.topic.color}` },
-      h("div", { class: "row", style: "justify-content:space-between" }, h("strong", { style: `color:${t.topic.color}` }, t.topic.name), t.lesson ? h("span", { class: "muted small" }, `레슨 ${t.lesson.number}/${t.lesson.total}`) : null),
-      t.lesson ? h("div", { class: "lesson-title" }, t.lesson.title, t.lesson.date ? h("span", { class: "badge b-today", style: "margin-left:6px" }, "📌") : null) : null,
-      h("div", { class: "task big-task" }, h("div", { class: "small muted" }, `오늘 할 일 · ${t.day}/${t.days}일차`), t.task),
-      t.lesson ? h("details", {}, h("summary", { class: "small muted" }, "이 레슨의 목표 보기"), h("div", { class: "small" }, t.lesson.task), h("div", { class: "small muted" }, t.lesson.stage)) : null,
-      check,
-      note,
-      postArea,
+    drawCheck();
+    cardEl.append(
+      ...[
+        h(
+          "div",
+          { class: "row", style: "justify-content:space-between" },
+          h("strong", { style: `color:${t.topic.color}` }, t.topic.name),
+          h(
+            "span",
+            { class: "row small muted", style: "gap:8px" },
+            t.lesson ? h("span", {}, `레슨 ${t.lesson.number}/${t.lesson.total}`) : null,
+            h("button", { class: "link small done-toggle", onclick: (e) => (e.target.textContent = cardEl.classList.toggle("is-open") ? "접기" : "기록 보기") }, "기록 보기"),
+          ),
+        ),
+        t.lesson ? h("div", { class: "lesson-title" }, t.lesson.title, t.lesson.date ? h("span", { class: "badge b-today", style: "margin-left:6px" }, "📌") : null) : null,
+        h(
+          "div",
+          { class: "task big-task" },
+          h("div", { class: "small muted" }, `오늘 할 일 · ${t.day}/${t.days}일차${g ? ` · ⏱ 약 ${minutesText(g.minutes)}` : ""}`),
+          t.task,
+          t.done && answered ? h("div", { class: "small muted" }, `📝 기록 ${answered}개`) : null,
+        ),
+        t.lesson ? h("details", { class: "lesson-goal" }, h("summary", { class: "small muted" }, "이 레슨의 목표 보기"), h("div", { class: "small" }, t.lesson.task), h("div", { class: "small muted" }, t.lesson.stage)) : null,
+        guideArea,
+        recordArea,
+        check,
+        postArea,
+      ].filter(Boolean),
     );
     return cardEl;
   };
@@ -285,7 +485,15 @@ async function renderToday() {
       ),
       h("div", { class: "row small" }, streak, ...v.events.map((e) => h("span", { class: "badge", style: `color:${e.topic.color}` }, `🏁 ${e.event.name} ${dday(e.event.date)}`))),
     ),
-    h("div", { class: "card row", style: "gap:14px" }, h("span", {}, "오늘 실천"), counter, h("div", { style: "flex:1;min-width:120px" }, progress)),
+    h(
+      "div",
+      { class: "card row", style: "gap:14px" },
+      h("span", {}, "오늘 실천"),
+      counter,
+      h("div", { style: "flex:1;min-width:120px" }, progress),
+      totalMinutes ? h("span", { class: "small muted", title: "가이드가 있는 할 일의 예상 시간 합계" }, `⏱ 약 ${minutesText(totalMinutes)}`) : null,
+      missingGuides ? h("button", { class: "ghost small", onclick: () => startGuide({ date: v.date }) }, `📘 가이드 한 번에 만들기 (${missingGuides})`) : null,
+    ),
     h("div", { class: "today-grid" }, ...v.tasks.map(card)),
     h("h3", {}, "이번 주 실천"),
     h(

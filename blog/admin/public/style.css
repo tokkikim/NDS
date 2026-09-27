@@ -592,6 +592,179 @@ section + section {
   margin-top: 28px;
 }
 
+/* ── 할 일 가이드·기록 ── */
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+button.link.small {
+  font-size: 0.82rem;
+}
+.guide-area,
+.record-area {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.guide-why {
+  color: var(--text);
+  opacity: 0.85;
+}
+.step-progress {
+  height: 5px;
+}
+.step-progress span {
+  transition: width 0.3s;
+}
+.guide-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.guide-steps li {
+  border-radius: 8px;
+  padding: 4px 6px;
+}
+.guide-steps li.is-current {
+  background: var(--code);
+}
+.step-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.step-row input,
+.guide-steps.full input {
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  flex: none;
+  accent-color: var(--go);
+  cursor: pointer;
+}
+.step-title {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.guide-steps li.is-checked .step-title,
+.guide-steps.full li.is-checked strong {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.step-detail {
+  margin: 4px 0 4px 26px;
+  font-size: 0.88rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.guide-area details ul,
+.guide-full ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.done-when {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--go) 10%, transparent);
+}
+.notice {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--hold) 14%, transparent);
+}
+.guide-make {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 12px;
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  background: var(--accent-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.guide-make:hover {
+  border-style: solid;
+}
+.record-area {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.record-q {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.record-area textarea {
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.5;
+}
+.check.is-ready {
+  border-style: solid;
+  border-color: var(--go);
+  color: var(--go);
+  animation: ready 1.6s ease-in-out 2;
+}
+@keyframes ready {
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--go) 25%, transparent);
+  }
+}
+/* 완료한 카드는 접어서 남은 할 일이 눈에 띄게 합니다 ("기록 보기"로 펼침). */
+.done-toggle {
+  display: none;
+}
+.today-card.is-done .done-toggle {
+  display: inline;
+}
+.today-card.is-done:not(.is-open) :is(.guide-area, .record-area, .lesson-goal) {
+  display: none;
+}
+.today-card.is-done:not(.is-open) {
+  opacity: 0.75;
+}
+.guide-full {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+}
+.guide-full h4 {
+  margin: 0 0 4px;
+}
+.guide-full .guide-why {
+  margin: 0;
+}
+.guide-steps.full {
+  gap: 10px;
+}
+.guide-steps.full label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+.guide-steps.full p {
+  margin: 4px 0 0 26px;
+  line-height: 1.65;
+}
+
 /* ── 좁은 화면: 탭은 가로 스크롤, 버튼은 누르기 쉽게 ── */
 @media (max-width: 700px) {
   .top {

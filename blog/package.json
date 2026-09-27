@@ -15,7 +15,8 @@
     "research": "tsx scripts/research.ts",
     "naver": "tsx scripts/naver.ts",
     "admin": "tsx admin/server.ts",
-    "curriculum": "tsx scripts/curriculum.ts"
+    "curriculum": "tsx scripts/curriculum.ts",
+    "guide": "tsx scripts/guide.ts"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

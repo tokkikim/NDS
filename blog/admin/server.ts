@@ -14,6 +14,7 @@ import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
 import { buildSchedule, daysUntilEmpty, type DayPlan } from "../src/lib/schedule";
 import { dailyPlan, readDailyLog, writeDailyEntry } from "../src/lib/daily";
+import { guideItemFor, readGuide } from "../src/lib/guide";
 
 loadEnv();
 
@@ -236,10 +237,18 @@ function practiceStreak(): number {
   return n;
 }
 
+/** 실행 중인 가이드 작업이 다루는 레슨 id */
+function guideJobsRunning(): Set<string> {
+  return new Set(jobs.filter((j) => j.kind === "guide" && j.status === "running").flatMap((j) => j.topics ?? []));
+}
+
 function todayView(date: string) {
   const { topics } = readCategories();
   const log = readDailyLog();
-  const tasks = dailyFor(date).map((t) => ({
+  const generating = guideJobsRunning();
+  const tasks = dailyFor(date).map((t) => {
+    const found = t.lesson ? guideItemFor(readGuide(t.topic.slug, t.lesson.id), t.index, t.task) : null;
+    return {
     topic: t.topic,
     task: t.task,
     day: t.day,
@@ -250,7 +259,13 @@ function todayView(date: string) {
     post: t.post ? { status: t.post.status, slug: t.post.post?.slug ?? null, title: t.post.post?.title ?? null } : null,
     done: t.done,
     note: t.note ?? "",
-  }));
+    steps: t.steps,
+    answers: t.answers,
+    guide: found?.item ?? null,
+    guideStale: !!found?.stale,
+    guideGenerating: !!t.lesson && generating.has(t.lesson.id),
+  };
+  });
   // 선택한 날 기준 앞뒤 일주일의 실천 현황
   const week = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(date, i - 3);
@@ -452,11 +467,42 @@ const routes: [string, RegExp, Handler][] = [
     "PUT",
     /^\/api\/daily$/,
     async (req) => {
-      const { date, topic, done, note } = await readJson<{ date: string; topic: string; done: boolean; note?: string }>(req);
+      const { date, topic, done, note, steps, answers } = await readJson<{ date: string; topic: string; done: boolean; note?: string; steps?: number[]; answers?: Record<string, string> }>(req);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new HttpError(400, "날짜 형식이 잘못됐습니다");
       topicOrThrow(topic);
-      writeDailyEntry(date, topic, { done: !!done, note: typeof note === "string" ? note.slice(0, 2000) : undefined });
+      writeDailyEntry(date, topic, {
+        done: !!done,
+        note: typeof note === "string" ? note.slice(0, 2000) : undefined,
+        steps: Array.isArray(steps) ? steps.map(Number) : undefined,
+        answers: answers && typeof answers === "object" ? Object.fromEntries(Object.entries(answers).map(([k, v]) => [String(k), String(v ?? "")])) : undefined,
+      });
       return { ok: true, streak: practiceStreak() };
+    },
+  ],
+
+  // 할 일 가이드: 레슨 하나(topic+lesson) 또는 그날의 모든 레슨(date)
+  [
+    "POST",
+    /^\/api\/guide\/generate$/,
+    async (req) => {
+      const { topic, lesson, date, force } = await readJson<{ topic?: string; lesson?: string; date?: string; force?: boolean }>(req);
+      const flag = force ? ["--force"] : [];
+      if (lesson) {
+        const t = topicOrThrow(topic ?? null);
+        if (!/^[A-Za-z0-9_-]+$/.test(lesson)) throw new HttpError(400, "잘못된 레슨 id입니다");
+        const title = readCurriculum(t.slug)?.stages.flatMap((s) => s.lessons).find((l) => l.id === lesson)?.title ?? lesson;
+        return startJob("guide", `가이드: ${t.name} · ${title}`, "guide", ["--topic", t.slug, "--lesson", lesson, ...flag], [lesson]);
+      }
+      const d = date ?? todayString();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new HttpError(400, "날짜 형식이 잘못됐습니다");
+      const busy = guideJobsRunning();
+      const need = dailyFor(d).filter((t) => {
+        if (!t.lesson || busy.has(t.lesson.id)) return false;
+        const found = guideItemFor(readGuide(t.topic.slug, t.lesson.id), t.index, t.task);
+        return force || !found || found.stale;
+      });
+      if (!need.length) throw new HttpError(409, "만들 가이드가 없습니다 (모두 있거나 만드는 중입니다)");
+      return startJob("guide", `가이드: ${d} 할 일 ${need.length}개`, "guide", ["--date", d, "--only", need.map((t) => t.lesson!.id).join(","), ...flag], need.map((t) => t.lesson!.id));
     },
   ],
 

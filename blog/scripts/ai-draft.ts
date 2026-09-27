@@ -15,6 +15,7 @@ import { getAllPostFiles, parsePostFile, validatePost } from "../src/lib/posts";
 import { buildSchedule, lessonForDate } from "../src/lib/schedule";
 import { blockNotes, readDailyLog } from "../src/lib/daily";
 import { addDays } from "../src/lib/dates";
+import { readGuide } from "../src/lib/guide";
 import { editRule, ensureClaudeCli, loadPrompt, runClaude } from "./claude";
 import { fail, parseArgs, postPath, resolveDateAndTopic } from "./lib";
 
@@ -43,8 +44,33 @@ const lesson = args.subject ? undefined : lessonForDate(scheduleInput, date, top
 // 이 레슨 기간 동안 매일 체크하며 남긴 메모 → "직접 해보기" 재료
 const notes = blockNotes(topic.slug, date, buildSchedule({ ...scheduleInput, from: addDays(date, -30), to: date }), readDailyLog(), SITE.rotationStart);
 const practiceLog = notes.length
-  ? notes.map((n) => `- ${n.date} ${n.done ? "✔ 완료" : "✘ 못 함"}${n.note ? `: ${n.note}` : ""}`).join("\n")
+  ? notes
+      .map((n) =>
+        [
+          `- ${n.date} ${n.done ? "✔ 완료" : "✘ 못 함"}${n.steps?.length ? ` (가이드 단계 ${n.steps.length}개 체크)` : ""}${n.note ? `: ${n.note}` : ""}`,
+          ...Object.entries(n.answers ?? {}).map(([q, a]) => `  - Q. ${q}\n    A. ${a}`),
+        ].join("\n"),
+      )
+      .join("\n")
   : "(기록 없음)";
+// 운영자가 이 레슨 동안 따라 한 단계별 가이드 → 독자용 "따라 해보기"의 뼈대
+const guide = lesson ? readGuide(topic.slug, lesson.id) : null;
+const guideText = guide
+  ? guide.items
+      .map((g, i) =>
+        [
+          `### ${i + 1}일차: ${g.task} (약 ${g.minutes}분)`,
+          g.prepare.length ? `- 준비: ${g.prepare.join(", ")}` : "",
+          ...g.steps.map((st, j) => `${j + 1}. ${st.title}${st.detail ? ` — ${st.detail}` : ""}`),
+          g.pitfalls.length ? `- 흔한 실수: ${g.pitfalls.join(" / ")}` : "",
+          g.doneWhen ? `- 완료 기준: ${g.doneWhen}` : "",
+          g.sources.length ? `- 가이드 출처: ${g.sources.map((x) => `${x.title} (${x.url})`).join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      )
+      .join("\n\n")
+  : "(가이드 없음 — 레슨 할 일을 바탕으로 독자가 따라 할 단계를 직접 구성하세요)";
 const curriculum = curricula[topic.slug];
 const subject = args.subject
   ? args.subject
@@ -69,6 +95,7 @@ const prompt = loadPrompt("draft", {
   topicDescription: topic.description,
   subject,
   practiceLog,
+  guide: guideText,
   previous: previous.length ? previous.join("\n") : "(아직 없음 - 입문자가 처음 공부하기 좋은 소재로 시작)",
 });
 
