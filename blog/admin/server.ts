@@ -491,7 +491,8 @@ const routes: [string, RegExp, Handler][] = [
 const MIME: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" };
 
 function sendFile(res: http.ServerResponse, file: string) {
-  res.writeHead(200, { "Content-Type": `${MIME[path.extname(file)] ?? "application/octet-stream"}; charset=utf-8` });
+  // 코드를 업데이트하면 바로 반영되도록 브라우저가 화면 파일을 캐시하지 않게 합니다.
+  res.writeHead(200, { "Content-Type": `${MIME[path.extname(file)] ?? "application/octet-stream"}; charset=utf-8`, "Cache-Control": "no-store" });
   fs.createReadStream(file).pipe(res);
 }
 
@@ -503,7 +504,7 @@ const server = http.createServer(async (req, res) => {
         const m = url.pathname.match(pattern);
         if (m && req.method === method) {
           const data = await handler(req, url, m.slice(1).map(decodeURIComponent));
-          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+          res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
           res.end(JSON.stringify(data));
           return;
         }
