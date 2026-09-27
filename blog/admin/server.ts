@@ -58,6 +58,7 @@ type Job = {
   topics?: string[];
 };
 const jobs: Job[] = [];
+const JOB_TIMEOUT_MIN = Number(process.env.JOB_TIMEOUT_MIN ?? 30);
 // 실행 중인 작업 프로세스 (중지 버튼용)
 const processes = new Map<number, ReturnType<typeof spawn>>();
 
@@ -110,6 +111,14 @@ function startJob(kind: string, label: string, script: string, args: string[], t
   const child = spawn(cmd.command, cmd.args, { cwd: ROOT, env: process.env, detached: process.platform !== "win32" });
   processes.set(job.id, child);
   takeSnapshot(job.id, guard);
+  // 너무 오래 걸리면(보통 3~10분) 헤매는 중일 가능성이 높아 자동으로 멈추고 파일을 되돌립니다.
+  const timer = setTimeout(() => {
+    if (job.status !== "running") return;
+    job.status = "stopped";
+    job.log += `\n[${JOB_TIMEOUT_MIN}분이 지나 자동으로 중지했습니다. 파일은 작업 전 상태로 되돌렸습니다]`;
+    killTree(child);
+  }, JOB_TIMEOUT_MIN * 60_000);
+  child.on("close", () => clearTimeout(timer));
   const append = (d: Buffer) => (job.log += d.toString());
   child.stdout.on("data", append);
   child.stderr.on("data", append);

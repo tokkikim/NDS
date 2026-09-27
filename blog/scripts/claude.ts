@@ -73,12 +73,23 @@ export function runClaude(prompt: string, opts: RunOptions): Promise<{ code: num
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   };
   return new Promise((resolve) => {
-    const child = spawn(cmd.command, cmd.args, { cwd: process.cwd(), shell: cmd.shell, stdio: ["pipe", "pipe", "inherit"] });
+    const child = spawn(cmd.command, cmd.args, {
+      cwd: process.cwd(),
+      shell: cmd.shell,
+      stdio: ["pipe", "pipe", "inherit"],
+      // 커리큘럼처럼 긴 파일을 한 번에 쓸 때 출력 한도에 걸리지 않도록 넉넉하게 잡습니다.
+      env: { ...process.env, CLAUDE_CODE_MAX_OUTPUT_TOKENS: process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS ?? "64000" },
+    });
     let buffer = "";
     let result: { text: string; isError: boolean } | null = null;
     const handle = (line: string) => {
       if (!line.trim()) return;
-      let event: { type?: string; message?: { content?: { type: string; name?: string; input?: Record<string, unknown> }[] }; result?: string; is_error?: boolean };
+      let event: {
+        type?: string;
+        message?: { content?: { type: string; name?: string; input?: Record<string, unknown>; is_error?: boolean; content?: unknown }[] };
+        result?: string;
+        is_error?: boolean;
+      };
       try {
         event = JSON.parse(line);
       } catch {
@@ -87,6 +98,13 @@ export function runClaude(prompt: string, opts: RunOptions): Promise<{ code: num
       if (event.type === "assistant") {
         for (const c of event.message?.content ?? []) {
           if (c.type === "tool_use" && c.name) console.log(`  [${elapsed()}] ${describeTool(c.name, c.input ?? {})}`);
+        }
+      } else if (event.type === "user") {
+        // 도구가 거부되거나 실패하면 이유를 로그에 남깁니다 (조용히 헤매지 않도록).
+        for (const c of event.message?.content ?? []) {
+          if (c.type !== "tool_result" || !c.is_error) continue;
+          const text = typeof c.content === "string" ? c.content : JSON.stringify(c.content ?? "");
+          console.log(`  [${elapsed()}] ⚠ 실패: ${text.replace(/\s+/g, " ").slice(0, 140)}`);
         }
       } else if (event.type === "result") {
         result = { text: String(event.result ?? ""), isError: !!event.is_error };
