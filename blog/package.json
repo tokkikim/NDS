@@ -11,7 +11,10 @@
     "lint": "eslint",
     "check": "tsx scripts/check-posts.ts",
     "new": "tsx scripts/new-post.ts",
-    "draft": "tsx scripts/ai-draft.ts"
+    "draft": "tsx scripts/ai-draft.ts",
+    "research": "tsx scripts/research.ts",
+    "plan": "tsx scripts/plan.ts",
+    "naver": "tsx scripts/naver.ts"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

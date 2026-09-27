@@ -17,6 +17,28 @@ export function parseArgs(argv = process.argv.slice(2)): Record<string, string> 
   return args;
 }
 
+/** --옵션과 그 값을 뺀 나머지 인자 (예: npm run research -- "투자" "영어") */
+export function positionals(argv = process.argv.slice(2)): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith("--")) {
+      if (argv[i + 1] && !argv[i + 1].startsWith("--")) i++;
+    } else {
+      out.push(argv[i]);
+    }
+  }
+  return out;
+}
+
+/** 파일 이름에 쓸 수 있게 바꿉니다. 한글은 그대로 둡니다. */
+export function toFileSlug(text: string): string {
+  return text
+    .trim()
+    .replace(/[\s/\\]+/g, "-")
+    .replace(/[^\p{L}\p{N}-]/gu, "")
+    .slice(0, 40);
+}
+
 /** 날짜와 주제를 인자에서 정하고, 없으면 오늘 날짜와 로테이션 주제를 씁니다. */
 export function resolveDateAndTopic(args: Record<string, string>): { date: string; topic: Topic } {
   const date = args.date ?? todayString();

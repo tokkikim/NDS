@@ -15,14 +15,60 @@ AI(Claude CLI)는 **조사와 초안**을 맡고, **직접 해본 경험과 사�
 | 썸네일·폰트 | 빌드할 때 자동 생성, Pretendard(OFL) | 무료 |
 | 개인 도메인 | 애드센스 신청할 때만 필요 (연 1~2만 원) | 선택 |
 
-## 하루 흐름
+## 전체 흐름
 
 ```
-① 초안   npm run draft        Claude CLI가 웹에서 조사·출처 확인 후 초안 작성 (draft: true)
-② 검토   직접 해보기 작성 + 스크린샷(선택) + 사실 확인 + TODO 삭제 + draft: false
-③ 게시   git push             Cloudflare Pages가 검사 → 빌드 → 배포 (미완성 글이면 배포 실패)
-④ 예약   매일 00:05 KST        날짜가 된 예약 글이 자동 공개 (GitHub Actions가 재빌드 요청)
+[1] 시장 분석 (주제 정할 때)   npm run research -- "주제A" "주제B"
+      주제별 검색 수요·경쟁·수익성·AI 대체 내성·확장성·적합성 점수 → 비교표 → 운영할 주제 결정
+[2] 콘텐츠 계획 (주 1회)       npm run plan -- --topic money
+      키워드 조사 → 핵심 글/하위 글 커리큘럼 → content/plan/<주제>.md 에서 내가 순서 조정·승인
+[3] 초안 (매일)                npm run draft
+      계획의 대기 맨 위 소재로 Claude CLI가 조사·출처 확인 후 초안 작성 (draft: true)
+[4] 검토 (매일)                직접 해보기 + 스크린샷(선택) + 사실 확인 + TODO 삭제 + draft: false
+[5] 게시                       git push → Cloudflare Pages가 검사 → 빌드 → 배포
+      날짜가 미래인 글은 매일 00:05 KST 재빌드 때 자동 공개
 ```
+
+## [1] 시장 분석
+
+```bash
+npm run research -- "투자" "회사원 업무자동화" "일본어"
+```
+
+- 주제마다 `research/<날짜>-<주제>.md`(리포트)와 `.json`(점수)이 생기고, `research/<날짜>-비교.md`에 순위가 정리됩니다.
+- 리포트 내용: 결론, 점수 근거, 키워드별 검색량, 경쟁 현황, 입문자 질문, 수익화 방법, 개인 블로그가 이길 수 있는 틈새, 첫 30개 소재, 위험 요소, 출처.
+- **분석 전에 `research/profile.md`를 채워두세요.** "운영자 적합성" 점수와 틈새 추천이 정확해집니다.
+- 점수 가중치와 판정 기준(70점 이상 GO)은 `scripts/scoring.ts`, 조사 지시는 `prompts/research.md`에서 바꿉니다.
+
+| 항목 | 가중치 | 데이터 |
+|---|---|---|
+| 검색 수요 | 25% | 네이버 검색광고 월간 검색량, 데이터랩 12개월 추세 |
+| 경쟁 여유 | 20% | 실제 검색 결과 상위 사이트 조사 |
+| 수익성 | 20% | 광고 입찰가, 광고 경쟁도, 제휴 상품 조사 |
+| AI 대체 내성 | 15% | 질문 유형 분석 (AI 한 줄 답변 vs 직접 경험 필요) |
+| 확장성 | 10% | 연관 키워드·하위 소재의 폭 |
+| 운영자 적합성 | 10% | `research/profile.md` |
+
+## [2] 콘텐츠 계획
+
+```bash
+npm run plan -- --topic money             # 소재 20개 추가
+npm run plan -- --topic money --count 30
+```
+
+`content/plan/<주제>.md`의 "대기" 목록에 소재가 추가됩니다. 항목마다 키워드와 검색량, 검색 의도, 핵심/하위 글 구분, 직접 해볼 실습, 수익 연결 메모가 붙습니다.
+**파일을 열어 순서를 바꾸거나 지우는 것이 승인입니다.** `npm run draft`는 대기 맨 위 소재로 쓰고, 쓴 소재는 "완료"로 옮깁니다.
+
+## 네이버 API 키 (무료)
+
+시장 분석과 계획에서 실제 검색량을 쓰려면 `.env.local`에 넣으세요. 없으면 웹 조사 기반 "추정"으로 표시됩니다.
+
+| 키 | 발급 |
+|---|---|
+| `NAVER_AD_API_KEY`, `NAVER_AD_SECRET`, `NAVER_AD_CUSTOMER_ID` | [네이버 검색광고](https://searchad.naver.com) 가입(광고비 결제 불필요) → 도구 → API 사용 관리 |
+| `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET` | [네이버 개발자센터](https://developers.naver.com) → 애플리케이션 등록 → API: 데이터랩(검색어트렌드) |
+
+직접 조회도 됩니다: `npm run -s naver -- keywords 재테크 ISA계좌` / `trend` / `bid`
 
 ## 시작하기
 
@@ -35,7 +81,9 @@ npm run dev                  # http://localhost:3000
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run draft` | Claude CLI로 오늘 주제의 초안 생성 (`--topic`, `--date`, `--subject`, `--model`) |
+| `npm run research -- "주제" …` | 주제별 시장 분석 리포트 + 비교표 |
+| `npm run plan -- --topic <slug>` | 카테고리 콘텐츠 계획(소재 목록) 추가 |
+| `npm run draft` | 계획의 다음 소재로 초안 생성 (`--topic`, `--date`, `--subject`, `--model`) |
 | `npm run new` | AI 없이 빈 템플릿 생성 (`--topic`, `--date`, `--title`) |
 | `npm run check` | 모든 글의 형식·게시 조건 검사 (빌드 전에 자동 실행) |
 | `npm run build` | 검사 후 정적 사이트 생성 (`out/`) |

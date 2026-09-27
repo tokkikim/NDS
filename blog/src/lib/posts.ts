@@ -130,6 +130,17 @@ export function validatePost(post: Post): string[] {
     }
   }
 
+  // 내부 링크가 없는 글이나 아직 공개되지 않은 글을 가리키면 404가 됩니다.
+  for (const [, target] of post.content.matchAll(/\]\(\/posts\/([^)#\s]+)\)/g)) {
+    const file = `${target}.md`;
+    if (!fs.existsSync(path.join(POSTS_DIR, file))) {
+      errors.push(`없는 글로 링크했습니다: /posts/${target}`);
+    } else if (!post.draft) {
+      const linked = parsePostFile(file);
+      if (linked.draft || linked.date > post.date) errors.push(`아직 공개되지 않은 글로 링크했습니다: /posts/${target}`);
+    }
+  }
+
   if (!post.draft) {
     if (post.content.includes(TODO_MARKER)) {
       errors.push("아직 채우지 않은 TODO 표시가 남아 있습니다");
