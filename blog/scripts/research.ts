@@ -28,6 +28,8 @@ async function analyze(topic: string): Promise<Outcome> {
   const reportFile = `${base}.md`;
   const jsonFile = `${base}.json`;
   const prompt = loadPrompt("research", { topic, date, reportFile, jsonFile, profile, criteria });
+  // 같은 날 재분석하면 이전 결과를 지우고 새로 씁니다 (실패 시 옛 결과가 남아 헷갈리지 않도록).
+  for (const f of [reportFile, jsonFile]) fs.rmSync(f, { force: true });
 
   console.log(`… [${topic}] 조사 시작`);
   const { code, output } = await runClaude(prompt, {

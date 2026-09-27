@@ -175,7 +175,23 @@ async function renderHome() {
 // ── 시장분석 ───────────────────────────────────────────────────────────────
 
 async function renderResearch() {
-  const groups = await api("/api/research");
+  const [groups, jobs] = await Promise.all([api("/api/research"), api("/api/jobs")]);
+  const busy = new Set(jobs.filter((j) => j.kind === "research" && j.status === "running").flatMap((j) => j.topics ?? []));
+  const reanalyze = (topics) =>
+    run(async () => {
+      watchJob(await api("/api/research", { method: "POST", body: { topics } }));
+      render(true);
+    });
+  const change = (r) => {
+    if (!r.prev) return h("span", { class: "muted small" }, "—");
+    const d = r.total - r.prev.total;
+    const mode = r.prev.dataMode !== r.dataMode ? ` (${r.prev.dataMode === "naver" ? "실측" : "추정"}→${r.dataMode === "naver" ? "실측" : "추정"})` : "";
+    return h(
+      "span",
+      { class: `small ${d > 0 ? "b-go" : d < 0 ? "b-no" : "muted"}`, title: `${r.prev.date} 분석: ${r.prev.total}점` },
+      `${d > 0 ? "▲" : d < 0 ? "▼" : "="}${Math.abs(d) || ""}${mode}`,
+    );
+  };
   const input = h("input", { type: "text", placeholder: "분석할 주제를 쉼표로 구분 (예: 일본어, 회사원 업무자동화, 절세 재테크)" });
   const start = () =>
     run(async () => {
@@ -188,20 +204,29 @@ async function renderResearch() {
     "div",
     { class: "stack" },
     h("h2", {}, "시장분석"),
-    h("div", { class: "card stack" }, h("div", { class: "row" }, input, h("button", { class: "primary", onclick: start }, "분석 시작")), h("div", { class: "muted small" }, "주제당 몇 분 걸립니다. 네이버 키가 없으면 추정 모드로 분석합니다. 같은 날 분석한 주제는 한 표에 모입니다.")),
+    h("div", { class: "card stack" }, h("div", { class: "row" }, input, h("button", { class: "primary", onclick: start }, "분석 시작")), h("div", { class: "muted small" }, "주제당 몇 분 걸립니다. 네이버 키가 없으면 추정 모드로 분석합니다. 같은 날 분석한 주제는 한 표에 모이고, 재분석하면 '이전 대비'에 점수 변화가 표시됩니다.")),
     ...(groups.length ? groups : [{ date: null, rows: [] }]).map((g) =>
       g.date
         ? h(
             "div",
             {},
-            h("h3", {}, `${g.date} 분석`),
+            h(
+              "div",
+              { class: "row", style: "justify-content:space-between;margin-top:22px" },
+              h("h3", { style: "margin:0" }, `${g.date} 분석`),
+              h(
+                "button",
+                { class: "ghost", disabled: g.rows.every((r) => busy.has(r.topic)), onclick: () => confirm(`${g.rows.length}개 주제를 모두 다시 분석할까요? (주제당 몇 분)`) && reanalyze(g.rows.map((r) => r.topic).filter((t) => !busy.has(t))) },
+                "전체 재분석",
+              ),
+            ),
             h(
               "div",
               { class: "table-wrap" },
               h(
                 "table",
                 {},
-                h("tr", {}, h("th", {}, "#"), h("th", {}, "주제"), h("th", {}, "종합"), h("th", {}, "판정"), ...CRITERIA.map(([, n]) => h("th", {}, n)), h("th", {}, "데이터")),
+                h("tr", {}, h("th", {}, "#"), h("th", {}, "주제"), h("th", {}, "종합"), h("th", {}, "판정"), ...CRITERIA.map(([, n]) => h("th", {}, n)), h("th", {}, "데이터"), h("th", {}, "이전 대비"), h("th", {}, "")),
                 ...g.rows.map((r, i) =>
                   h(
                     "tr",
@@ -212,6 +237,21 @@ async function renderResearch() {
                     h("td", {}, h("span", { class: `badge ${verdictClass(r.verdict)}` }, r.verdict)),
                     ...CRITERIA.map(([k]) => h("td", { class: "num" }, r.scores[k])),
                     h("td", {}, h("span", { class: "badge" }, r.dataMode === "naver" ? "실측" : "추정")),
+                    h("td", { class: "num" }, change(r)),
+                    h(
+                      "td",
+                      {},
+                      h(
+                        "button",
+                        {
+                          class: "ghost small",
+                          style: "white-space:nowrap",
+                          disabled: busy.has(r.topic),
+                          onclick: (e) => (e.stopPropagation(), reanalyze([r.topic])),
+                        },
+                        busy.has(r.topic) ? "분석 중…" : "재분석",
+                      ),
+                    ),
                   ),
                 ),
               ),

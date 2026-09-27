@@ -28,14 +28,29 @@ const PROFILE = path.join(RESEARCH_DIR, "profile.md");
 
 // ── 백그라운드 작업 (시장분석·계획·초안은 몇 분씩 걸립니다) ──────────────────
 
-type Job = { id: number; kind: string; label: string; status: "running" | "done" | "failed"; log: string; startedAt: string };
+type Job = {
+  id: number;
+  kind: string;
+  label: string;
+  status: "running" | "done" | "failed";
+  log: string;
+  startedAt: string;
+  /** 시장분석 작업이 다루는 주제들 (같은 주제를 동시에 두 번 분석하지 않도록) */
+  topics?: string[];
+};
 const jobs: Job[] = [];
 
-function startJob(kind: string, label: string, script: string, args: string[]): Job {
-  const running = jobs.find((j) => j.kind === kind && j.status === "running");
-  if (running) throw new HttpError(409, `이미 실행 중인 ${label} 작업이 있습니다`);
+function startJob(kind: string, label: string, script: string, args: string[], topics?: string[]): Job {
+  const running = jobs.filter((j) => j.kind === kind && j.status === "running");
+  if (topics) {
+    // 시장분석은 주제가 겹치지 않으면 여러 개를 동시에 돌릴 수 있습니다.
+    const busy = running.flatMap((j) => j.topics ?? []).filter((t) => topics.includes(t));
+    if (busy.length) throw new HttpError(409, `이미 분석 중인 주제입니다: ${busy.join(", ")}`);
+  } else if (running.length) {
+    throw new HttpError(409, `이미 실행 중인 ${label} 작업이 있습니다`);
+  }
 
-  const job: Job = { id: jobs.length + 1, kind, label, status: "running", log: "", startedAt: new Date().toISOString() };
+  const job: Job = { id: jobs.length + 1, kind, label, status: "running", log: "", startedAt: new Date().toISOString(), topics };
   jobs.unshift(job);
   const cmd = tsxCommand(`scripts/${script}.ts`, args);
   const child = spawn(cmd.command, cmd.args, { cwd: ROOT, env: process.env });
@@ -86,15 +101,30 @@ function allPosts() {
     .sort((a, b) => b.date.localeCompare(a.date));
 }
 
+type ResearchRow = {
+  topic: string;
+  total: number;
+  verdict: string;
+  dataMode: string;
+  summary: string;
+  scores: Record<string, number>;
+  report: string;
+  /** 같은 주제의 직전 분석 결과 (재분석 전후 비교용) */
+  prev?: { date: string; total: number; dataMode: string };
+};
+
 function researchResults() {
   if (!fs.existsSync(RESEARCH_DIR)) return [];
-  const byDate = new Map<string, unknown[]>();
+  const byDate = new Map<string, ResearchRow[]>();
+  const lastByTopic = new Map<string, { date: string; total: number; dataMode: string }>();
+  // 파일명이 날짜로 시작하므로 정렬하면 오래된 분석부터 읽습니다.
   for (const f of fs.readdirSync(RESEARCH_DIR).filter((f) => f.endsWith(".json")).sort()) {
     try {
       const r = JSON.parse(fs.readFileSync(path.join(RESEARCH_DIR, f), "utf8")) as ResearchResult;
       if (validateResearch(r).length) continue;
       const total = totalScore(r);
-      const row = {
+      const prev = lastByTopic.get(r.topic);
+      const row: ResearchRow = {
         topic: r.topic,
         total,
         verdict: verdict(total),
@@ -102,7 +132,9 @@ function researchResults() {
         summary: r.summary,
         scores: Object.fromEntries(CRITERIA.map((c) => [c.key, r.scores[c.key].score])),
         report: `research/${f.replace(/\.json$/, ".md")}`,
+        prev: prev && prev.date < r.date ? prev : undefined,
       };
+      lastByTopic.set(r.topic, { date: r.date, total, dataMode: r.dataMode });
       byDate.set(r.date, [...(byDate.get(r.date) ?? []), row]);
     } catch {
       // 깨진 파일은 목록에서 뺍니다.
@@ -110,7 +142,7 @@ function researchResults() {
   }
   return [...byDate.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, rows]) => ({ date, rows: (rows as { total: number }[]).sort((a, b) => b.total - a.total) }));
+    .map(([date, rows]) => ({ date, rows: rows.sort((a, b) => b.total - a.total) }));
 }
 
 function status() {
@@ -201,7 +233,8 @@ const routes: [string, RegExp, Handler][] = [
       const { topics } = await readJson<{ topics: string[] }>(req);
       const list = (topics ?? []).map((t) => t.trim()).filter(Boolean).slice(0, 10);
       if (!list.length) throw new HttpError(400, "주제를 하나 이상 입력하세요");
-      return startJob("research", `시장분석: ${list.join(", ")}`, "research", list);
+      const label = list.length === 1 ? `시장분석: ${list[0]}` : `시장분석: ${list.length}개 주제`;
+      return startJob("research", label, "research", list, list);
     },
   ],
   ["GET", /^\/api\/profile$/, () => ({ text: fs.existsSync(PROFILE) ? fs.readFileSync(PROFILE, "utf8") : "" })],
