@@ -70,8 +70,10 @@ export function dailyPlan(date: string, topics: Topic[], schedule: DayPlan[], lo
     const days = Math.max(1, daysBetween(blockStart, next.date) + 1);
     const day = Math.min(days, Math.max(1, daysBetween(blockStart, date) + 1));
     const daily = next.lesson.daily?.length ? next.lesson.daily : null;
-    // 블록 길이가 daily 수와 다르면(날짜 고정·여유일 등) 비율로 맞춥니다.
-    const task = daily ? daily[Math.min(daily.length - 1, Math.floor(((day - 1) * daily.length) / days))] : next.lesson.task;
+    // 블록 길이가 daily 수와 다를 때(날짜 고정·여유일 등):
+    // 짧으면 글 쓰는 날(마지막 항목)부터 거꾸로 맞추고, 길면 비율로 늘립니다. 마지막 날은 항상 마지막 항목입니다.
+    const index = !daily ? 0 : days <= daily.length ? daily.length - days + day - 1 : Math.floor(((day - 1) * daily.length) / days);
+    const task = daily ? daily[Math.min(daily.length - 1, Math.max(0, index))] : next.lesson.task;
     const isPostDay = next.date === date;
     return { topic, lesson: next.lesson, postDate: next.date, day, days, task, isPostDay, post: isPostDay ? next : undefined, done: !!entry?.done, note: entry?.note };
   });
