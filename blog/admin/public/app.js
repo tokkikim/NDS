@@ -99,9 +99,23 @@ async function renderJobs() {
         h(
           "div",
           { class: "row" },
-          h("span", { class: `badge ${j.status === "done" ? "b-go" : j.status === "failed" ? "b-no" : "b-hold"}` }, { running: "실행 중", done: "완료", failed: "실패" }[j.status]),
+          h("span", { class: `badge ${j.status === "done" ? "b-go" : j.status === "failed" ? "b-no" : "b-hold"}` }, { running: "실행 중", done: "완료", failed: "실패", stopped: "중지됨" }[j.status]),
           j.label,
           h("span", { class: "muted small" }, elapsedText(j)),
+          j.status === "running"
+            ? h(
+                "button",
+                {
+                  class: "icon small",
+                  title: "작업 중지",
+                  onclick: (e) => {
+                    e.stopPropagation();
+                    if (confirm(`"${j.label}" 작업을 중지할까요? 쓰던 파일은 이전 상태로 되돌려집니다.`)) run(async () => (await api(`/api/jobs/${j.id}/stop`, { method: "POST" }), renderJobs()));
+                  },
+                },
+                "■ 중지",
+              )
+            : null,
         ),
         h("pre", {}, j.tail.split("\n").slice(-3).join("\n")),
       ),
@@ -111,7 +125,7 @@ async function renderJobs() {
   for (const j of visible) {
     if (j.status !== "running" && state.watching.has(j.id) && !renderJobs.finished?.has(j.id)) {
       (renderJobs.finished ??= new Set()).add(j.id);
-      toast(`${j.status === "done" ? "완료" : "실패"}: ${j.label}`);
+      toast(`${{ done: "완료", failed: "실패", stopped: "중지됨" }[j.status]}: ${j.label}`);
       render();
     }
   }

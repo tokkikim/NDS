@@ -50,7 +50,7 @@ type Job = {
   id: number;
   kind: string;
   label: string;
-  status: "running" | "done" | "failed";
+  status: "running" | "done" | "failed" | "stopped";
   log: string;
   startedAt: string;
   finishedAt?: string;
@@ -58,8 +58,42 @@ type Job = {
   topics?: string[];
 };
 const jobs: Job[] = [];
+// 실행 중인 작업 프로세스 (중지 버튼용)
+const processes = new Map<number, ReturnType<typeof spawn>>();
 
-function startJob(kind: string, label: string, script: string, args: string[], topics?: string[]): Job {
+/** 작업과 그 안에서 실행된 claude 등 하위 프로세스까지 모두 끝냅니다. */
+function killTree(child: ReturnType<typeof spawn>) {
+  if (!child.pid) return;
+  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+  else {
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      child.kill("SIGTERM");
+    }
+  }
+}
+
+/** 작업이 고칠 파일들의 시작 전 상태 (중지하면 되돌림). null = 원래 없던 파일 */
+const snapshots = new Map<number, { files: Map<string, string | null>; posts: Set<string> }>();
+
+function takeSnapshot(jobId: number, files: string[]) {
+  const map = new Map(files.map((f) => [f, fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null]));
+  snapshots.set(jobId, { files: map, posts: new Set(getAllPostFiles()) });
+}
+
+function restoreSnapshot(jobId: number) {
+  const snap = snapshots.get(jobId);
+  if (!snap) return;
+  for (const [file, content] of snap.files) {
+    if (content === null) fs.rmSync(file, { force: true });
+    else fs.writeFileSync(file, content);
+  }
+  // 작업 중에 새로 생긴 글(초안) 파일은 지웁니다.
+  for (const f of getAllPostFiles()) if (!snap.posts.has(f)) fs.rmSync(path.join(POSTS_DIR, f), { force: true });
+}
+
+function startJob(kind: string, label: string, script: string, args: string[], topics?: string[], guard: string[] = []): Job {
   const running = jobs.filter((j) => j.kind === kind && j.status === "running");
   if (topics) {
     // 시장분석은 주제가 겹치지 않으면 여러 개를 동시에 돌릴 수 있습니다.
@@ -72,7 +106,10 @@ function startJob(kind: string, label: string, script: string, args: string[], t
   const job: Job = { id: jobs.length + 1, kind, label, status: "running", log: "", startedAt: new Date().toISOString(), topics };
   jobs.unshift(job);
   const cmd = tsxCommand(`scripts/${script}.ts`, args);
-  const child = spawn(cmd.command, cmd.args, { cwd: ROOT, env: process.env });
+  // 리눅스·맥에서는 별도 프로세스 그룹으로 띄워야 하위 프로세스까지 한 번에 중지할 수 있습니다.
+  const child = spawn(cmd.command, cmd.args, { cwd: ROOT, env: process.env, detached: process.platform !== "win32" });
+  processes.set(job.id, child);
+  takeSnapshot(job.id, guard);
   const append = (d: Buffer) => (job.log += d.toString());
   child.stdout.on("data", append);
   child.stderr.on("data", append);
@@ -81,8 +118,11 @@ function startJob(kind: string, label: string, script: string, args: string[], t
     job.log += `\n[실행 실패] ${err.message}`;
   });
   child.on("close", (code) => {
+    processes.delete(job.id);
+    if (job.status === "stopped") restoreSnapshot(job.id);
+    snapshots.delete(job.id);
     job.finishedAt = new Date().toISOString();
-    job.status = code === 0 ? "done" : "failed";
+    if (job.status === "running") job.status = code === 0 ? "done" : "failed";
     job.log += `\n[종료 코드 ${code}]`;
   });
   return job;
@@ -381,10 +421,11 @@ const routes: [string, RegExp, Handler][] = [
     async (req) => {
       const { topic, lessons, append, daily } = await readJson<{ topic: string; lessons?: number; append?: boolean; daily?: boolean }>(req);
       const t = topicOrThrow(topic);
-      if (daily) return startJob("curriculum", `커리큘럼: ${t.name} 매일 할 일 채우기`, "curriculum", ["--topic", t.slug, "--daily"], [t.slug]);
+      const guard = [path.join(ROOT, "content", "curriculum", `${t.slug}.json`)];
+      if (daily) return startJob("curriculum", `커리큘럼: ${t.name} 매일 할 일 채우기`, "curriculum", ["--topic", t.slug, "--daily"], [t.slug], guard);
       const n = String(Math.min(60, Math.max(5, Number(lessons) || 30)));
       const args = ["--topic", t.slug, ...(append ? ["--append", n] : ["--lessons", n])];
-      return startJob("curriculum", `커리큘럼: ${t.name} ${append ? `레슨 ${n}개 추가` : "설계"}`, "curriculum", args, [t.slug]);
+      return startJob("curriculum", `커리큘럼: ${t.name} ${append ? `레슨 ${n}개 추가` : "설계"}`, "curriculum", args, [t.slug], guard);
     },
   ],
 
@@ -555,6 +596,19 @@ const routes: [string, RegExp, Handler][] = [
   // 작업
   ["GET", /^\/api\/jobs$/, () => jobs.slice(0, 20).map(({ log, ...j }) => ({ ...j, tail: log.slice(-300) }))],
   [
+    "POST",
+    /^\/api\/jobs\/(\d+)\/stop$/,
+    (_req, _url, [id]) => {
+      const job = jobs.find((j) => j.id === Number(id));
+      const child = processes.get(Number(id));
+      if (!job || !child || job.status !== "running") throw new HttpError(404, "실행 중인 작업이 아닙니다");
+      job.status = "stopped";
+      job.log += "\n[사용자가 중지했습니다]";
+      killTree(child);
+      return { ok: true };
+    },
+  ],
+  [
     "GET",
     /^\/api\/jobs\/(\d+)$/,
     (_req, _url, [id]) => {
@@ -608,6 +662,11 @@ server.on("error", (err: NodeJS.ErrnoException) => {
     console.error(`✖ 대시보드를 시작하지 못했습니다: ${err.message}`);
   }
   process.exit(1);
+});
+// 대시보드를 끄면(Ctrl+C) 돌고 있던 작업도 함께 정리합니다.
+process.on("SIGINT", () => {
+  for (const child of processes.values()) killTree(child);
+  process.exit(0);
 });
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`✔ 관리자 대시보드: http://localhost:${PORT}  (이 창을 닫으면 대시보드도 꺼집니다)`);
