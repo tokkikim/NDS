@@ -4,6 +4,7 @@
 //   npm run curriculum -- --topic marathon --append 15   # 기존 뒤에 레슨 15개 이어서 추가
 //   npm run curriculum -- --topic marathon --event "2027 대구마라톤" --event-date 2027-02-28 --registration 2026-10-12
 //     → 목표 대회에 맞춰 레슨 수를 계산하고, 접수일·대회 당일 레슨을 그 날짜에 고정합니다.
+//   npm run curriculum -- --topic marathon --daily        # 레슨은 그대로 두고 레슨별 매일 할 일만 채우기
 // 이미 글로 쓴 레슨은 다시 만들 때도 그대로 보존됩니다.
 import fs from "node:fs";
 import path from "node:path";
@@ -16,6 +17,7 @@ import { ensureClaudeCli, loadPrompt, NAVER_TOOL, runClaude } from "./claude";
 import { fail, parseArgs } from "./lib";
 
 const args = parseArgs();
+const fillDaily = args.daily !== undefined;
 const topic = args.topic ? getTopic(args.topic) : undefined;
 if (!topic) fail(`--topic을 지정하세요 (가능: ${TOPICS.map((t) => t.slug).join(", ")})`);
 ensureClaudeCli();
@@ -56,13 +58,24 @@ const reports = fs.existsSync(researchDir)
       .map((f) => `research/${f}`)
   : [];
 
+if (fillDaily && !existing) fail("매일 할 일을 채우려면 먼저 커리큘럼이 있어야 합니다.");
+
 const keepRule = append
   ? `기존 단계와 레슨은 한 글자도 바꾸지 말고 그대로 두세요. 그 뒤에 새 레슨 ${count}개를 이어서 추가하세요 (기존 마지막 단계에 이어 붙이거나 새 단계를 만드세요).`
   : usedIds.length
     ? `이미 글로 쓴 레슨(id: ${usedIds.join(", ")})은 id·제목·할 일을 그대로 두고 커리큘럼 앞쪽에 유지하세요. 나머지는 새로 설계해도 됩니다.`
     : "처음부터 새로 설계하세요. 모든 레슨의 id는 빈 문자열로 두세요.";
 
-const prompt = loadPrompt("curriculum", {
+const prompt = fillDaily
+  ? loadPrompt("daily", {
+      topicName: topic.name,
+      topicDescription: topic.description,
+      file: relFile,
+      cadence: String(TOPICS.length),
+      last: String(TOPICS.length - 1),
+      others: String(TOPICS.length - 1),
+    })
+  : loadPrompt("curriculum", {
   topicName: topic.name,
   topicDescription: topic.description,
   topicSlug: topic.slug,
@@ -100,9 +113,9 @@ const restore = (reason: string): never => {
   return fail(`${reason} (이전 커리큘럼으로 되돌렸습니다)`);
 };
 
-console.log(`… ${topic.name} 커리큘럼 ${append ? `레슨 ${count}개 추가` : "설계"} 중 (조사 때문에 몇 분 걸릴 수 있어요)`);
+console.log(`… ${topic.name} 커리큘럼 ${fillDaily ? "매일 할 일 채우기" : append ? `레슨 ${count}개 추가` : "설계"} 중 (몇 분 걸릴 수 있어요)`);
 runClaude(prompt, {
-  allowedTools: ["WebSearch", "WebFetch", "Read", "Glob", "Grep", NAVER_TOOL, `Edit(./${relFile})`],
+  allowedTools: fillDaily ? ["Read", `Edit(./${relFile})`] : ["WebSearch", "WebFetch", "Read", "Glob", "Grep", NAVER_TOOL, `Edit(./${relFile})`],
   model: args.model,
   inheritOutput: true,
 }).then(({ code }) => {
@@ -125,6 +138,14 @@ runClaude(prompt, {
   const ids = new Set(allLessons(saved).map((l) => l.id));
   const lost = usedIds.filter((id) => !ids.has(id));
   if (lost.length) restore(`이미 글로 쓴 레슨이 사라졌습니다: ${lost.join(", ")}`);
+  if (fillDaily) {
+    // daily만 추가하고 나머지는 그대로여야 합니다.
+    const before = allLessons(existing!).map((l) => `${l.id}|${l.title}|${l.task}|${l.date ?? ""}`).join("\n");
+    const after = allLessons(saved).map((l) => `${l.id}|${l.title}|${l.task}|${l.date ?? ""}`).join("\n");
+    if (before !== after) restore("매일 할 일을 채우는 중에 레슨 내용이 바뀌었습니다");
+    const missing = allLessons(saved).filter((l) => (l.daily?.length ?? 0) !== TOPICS.length).length;
+    if (missing) console.log(`  ⚠ daily가 ${TOPICS.length}개가 아닌 레슨 ${missing}개 — 커리큘럼 탭에서 확인하세요`);
+  }
 
   const total = allLessons(saved).length;
   console.log(`\n✔ ${relFile}: ${saved.stages.length}단계 · 레슨 ${total}개 (약 ${total * TOPICS.length}일 분량)`);

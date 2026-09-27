@@ -13,6 +13,8 @@ import { readCurriculum } from "../src/lib/curriculum";
 import { todayString } from "../src/lib/dates";
 import { getAllPostFiles, parsePostFile, validatePost } from "../src/lib/posts";
 import { buildSchedule, lessonForDate } from "../src/lib/schedule";
+import { blockNotes, readDailyLog } from "../src/lib/daily";
+import { addDays } from "../src/lib/dates";
 import { ensureClaudeCli, loadPrompt, runClaude } from "./claude";
 import { fail, parseArgs, postPath, resolveDateAndTopic } from "./lib";
 
@@ -38,6 +40,11 @@ const previous = allPosts
   .map((p) => `- ${p.title} (/posts/${p.slug})`);
 
 const lesson = args.subject ? undefined : lessonForDate(scheduleInput, date, topic.slug);
+// 이 레슨 기간 동안 매일 체크하며 남긴 메모 → "직접 해보기" 재료
+const notes = blockNotes(topic.slug, date, buildSchedule({ ...scheduleInput, from: addDays(date, -30), to: date }), readDailyLog(), SITE.rotationStart);
+const practiceLog = notes.length
+  ? notes.map((n) => `- ${n.date} ${n.done ? "✔ 완료" : "✘ 못 함"}${n.note ? `: ${n.note}` : ""}`).join("\n")
+  : "(기록 없음)";
 const curriculum = curricula[topic.slug];
 const subject = args.subject
   ? args.subject
@@ -61,6 +68,7 @@ const prompt = loadPrompt("draft", {
   topicName: topic.name,
   topicDescription: topic.description,
   subject,
+  practiceLog,
   previous: previous.length ? previous.join("\n") : "(아직 없음 - 입문자가 처음 공부하기 좋은 소재로 시작)",
 });
 

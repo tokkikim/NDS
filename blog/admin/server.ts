@@ -13,6 +13,7 @@ import { getAllPostFiles, getStreak, IMAGE_ALT_PLACEHOLDER, isPublished, parsePo
 import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
 import { buildSchedule, daysUntilEmpty, type DayPlan } from "../src/lib/schedule";
+import { dailyPlan, readDailyLog, writeDailyEntry } from "../src/lib/daily";
 
 loadEnv();
 
@@ -160,6 +161,54 @@ function researchResults() {
   return [...byDate.entries()]
     .sort((a, b) => b[0].localeCompare(a[0]))
     .map(([date, rows]) => ({ date, rows: rows.sort((a, b) => b.total - a.total) }));
+}
+
+// ── 매일 실천 ──────────────────────────────────────────────────────────────
+
+function dailyFor(date: string) {
+  const { startDate, topics } = readCategories();
+  return dailyPlan(date, topics, schedule(addDays(date, -21), addDays(date, 60)), readDailyLog(), startDate);
+}
+
+/** 오늘(아직 다 못 했으면 어제)부터 거꾸로, 모든 카테고리 할 일을 체크한 연속 일수 */
+function practiceStreak(): number {
+  const { startDate, topics } = readCategories();
+  const log = readDailyLog();
+  const allDone = (d: string) => topics.every((t) => log[d]?.[t.slug]?.done);
+  let d = todayString();
+  if (!allDone(d)) d = addDays(d, -1);
+  let n = 0;
+  while (d >= startDate && allDone(d)) {
+    n++;
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
+function todayView(date: string) {
+  const { topics } = readCategories();
+  const log = readDailyLog();
+  const tasks = dailyFor(date).map((t) => ({
+    topic: t.topic,
+    task: t.task,
+    day: t.day,
+    days: t.days,
+    isPostDay: t.isPostDay,
+    postDate: t.postDate,
+    lesson: t.lesson ? { id: t.lesson.id, title: t.lesson.title, number: t.lesson.number, total: t.lesson.total, stage: t.lesson.stage, date: t.lesson.date, task: t.lesson.task } : null,
+    post: t.post ? { status: t.post.status, slug: t.post.post?.slug ?? null, title: t.post.post?.title ?? null } : null,
+    done: t.done,
+    note: t.note ?? "",
+  }));
+  // 선택한 날 기준 앞뒤 일주일의 실천 현황
+  const week = Array.from({ length: 7 }, (_, i) => {
+    const d = addDays(date, i - 3);
+    return { date: d, topics: topics.map((t) => ({ slug: t.slug, color: t.color, done: !!log[d]?.[t.slug]?.done })) };
+  });
+  const events = topics
+    .map((t) => ({ topic: t, event: readCurriculum(t.slug)?.event }))
+    .filter((e): e is { topic: Topic; event: NonNullable<Curriculum["event"]> } => !!e.event);
+  return { date, today: todayString(), tasks, week, streak: practiceStreak(), events };
 }
 
 function status() {
@@ -328,11 +377,34 @@ const routes: [string, RegExp, Handler][] = [
     "POST",
     /^\/api\/curriculum\/generate$/,
     async (req) => {
-      const { topic, lessons, append } = await readJson<{ topic: string; lessons?: number; append?: boolean }>(req);
+      const { topic, lessons, append, daily } = await readJson<{ topic: string; lessons?: number; append?: boolean; daily?: boolean }>(req);
       const t = topicOrThrow(topic);
+      if (daily) return startJob("curriculum", `커리큘럼: ${t.name} 매일 할 일 채우기`, "curriculum", ["--topic", t.slug, "--daily"], [t.slug]);
       const n = String(Math.min(60, Math.max(5, Number(lessons) || 30)));
       const args = ["--topic", t.slug, ...(append ? ["--append", n] : ["--lessons", n])];
       return startJob("curriculum", `커리큘럼: ${t.name} ${append ? `레슨 ${n}개 추가` : "설계"}`, "curriculum", args, [t.slug]);
+    },
+  ],
+
+  // 매일 실천
+  [
+    "GET",
+    /^\/api\/today$/,
+    (_req, url) => {
+      const date = url.searchParams.get("date") ?? todayString();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "날짜 형식이 잘못됐습니다");
+      return todayView(date);
+    },
+  ],
+  [
+    "PUT",
+    /^\/api\/daily$/,
+    async (req) => {
+      const { date, topic, done, note } = await readJson<{ date: string; topic: string; done: boolean; note?: string }>(req);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) throw new HttpError(400, "날짜 형식이 잘못됐습니다");
+      topicOrThrow(topic);
+      writeDailyEntry(date, topic, { done: !!done, note: typeof note === "string" ? note.slice(0, 2000) : undefined });
+      return { ok: true, streak: practiceStreak() };
     },
   ],
 
@@ -345,7 +417,10 @@ const routes: [string, RegExp, Handler][] = [
       if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, "월 형식이 잘못됐습니다");
       const from = `${month}-01`;
       const to = addDays(addDays(from, 31).slice(0, 7) + "-01", -1);
-      return { month, today: todayString(), days: schedule(from, to) };
+      const log = readDailyLog();
+      const { topics } = readCategories();
+      const days = schedule(from, to).map((d) => ({ ...d, practice: topics.map((t) => ({ slug: t.slug, color: t.color, done: !!log[d.date]?.[t.slug]?.done })) }));
+      return { month, today: todayString(), days };
     },
   ],
 

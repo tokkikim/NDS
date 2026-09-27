@@ -16,6 +16,8 @@ export type Lesson = {
   keywords: string[];
   /** 이 날짜에 고정 (대회 당일·접수일처럼 날짜가 정해진 레슨). 없으면 순서대로 배정 */
   date?: string;
+  /** 레슨 기간(카테고리 차례 사이) 동안 매일 할 일. 마지막 날이 글 쓰는 날 */
+  daily?: string[];
 };
 
 /** 커리큘럼이 향하는 날짜가 정해진 목표 (대회, 시험 등) */
@@ -109,6 +111,7 @@ function normalizeIds(slug: string, c: Curriculum): Curriculum {
           task: l.task.trim(),
           keywords: Array.isArray(l.keywords) ? l.keywords.map(String).filter(Boolean) : [],
           ...(l.date ? { date: l.date } : {}),
+          ...(Array.isArray(l.daily) && l.daily.some((d) => String(d).trim()) ? { daily: l.daily.map((d) => String(d).trim()).filter(Boolean) } : {}),
         };
       }),
     })),
