@@ -5,13 +5,14 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import matter from "gray-matter";
-import { getTopic, TOPICS } from "../src/blog.config";
-import { todayString, topicForDate } from "../src/lib/dates";
+import type { Topic } from "../src/blog.config";
+import { allLessons, readCurriculum, writeCurriculum, type Curriculum } from "../src/lib/curriculum";
+import { addDays, todayString } from "../src/lib/dates";
 import { renderMarkdown } from "../src/lib/markdown";
 import { getAllPostFiles, getStreak, IMAGE_ALT_PLACEHOLDER, isPublished, parsePostFile, POSTS_DIR, PUBLIC_DIR, validatePost } from "../src/lib/posts";
-import { createPlanFile, doneItems, pendingItems, planPath, savePending, type PlanItem } from "../scripts/plan-file";
 import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
+import { buildSchedule, daysUntilEmpty, type DayPlan } from "../src/lib/schedule";
 
 loadEnv();
 
@@ -25,8 +26,24 @@ const ROOT = process.cwd();
 const STATIC_DIR = path.join(ROOT, "admin", "public");
 const RESEARCH_DIR = path.join(ROOT, "research");
 const PROFILE = path.join(RESEARCH_DIR, "profile.md");
+const CATEGORIES_FILE = path.join(ROOT, "content", "topics.json");
 
-// ── 백그라운드 작업 (시장분석·계획·초안은 몇 분씩 걸립니다) ──────────────────
+// ── 카테고리·커리큘럼·일정 (대시보드에서 바뀌므로 매번 파일에서 새로 읽습니다) ──
+
+type Categories = { startDate: string; topics: Topic[] };
+
+function readCategories(): Categories {
+  return JSON.parse(fs.readFileSync(CATEGORIES_FILE, "utf8")) as Categories;
+}
+
+function schedule(from: string, to: string): DayPlan[] {
+  const { startDate, topics } = readCategories();
+  const curricula = Object.fromEntries(topics.map((t) => [t.slug, readCurriculum(t.slug)]));
+  const posts = getAllPostFiles().map(parsePostFile);
+  return buildSchedule({ startDate, topics, curricula, posts, today: todayString(), from, to });
+}
+
+// ── 백그라운드 작업 (시장분석·커리큘럼·초안은 몇 분씩 걸립니다) ──────────────────
 
 type Job = {
   id: number;
@@ -147,6 +164,8 @@ function researchResults() {
 
 function status() {
   const today = todayString();
+  const { topics } = readCategories();
+  const ahead = schedule(today, addDays(today, 90));
   const posts = allPosts();
   const published = getAllPostFiles().map(parsePostFile).filter((p) => isPublished(p, today));
   const claude = claudeCommand(["--version"]);
@@ -154,11 +173,20 @@ function status() {
   const hasClaude = !probe.error && probe.status === 0;
   return {
     today,
-    todayTopic: topicForDate(today),
+    todayPlan: ahead[0],
     todayPost: posts.find((p) => p.date === today) ?? null,
+    week: ahead.slice(1, 8),
     streak: getStreak(published),
     counts: Object.fromEntries(["게시", "예약", "초안", "문제"].map((s) => [s, posts.filter((p) => p.status === s).length])),
-    plans: TOPICS.map((t) => ({ ...t, pending: pendingItems(planPath(t)).length, done: doneItems(planPath(t)).length })),
+    curricula: (() => {
+      const empty = daysUntilEmpty(ahead);
+      return topics.map((t) => {
+        const c = readCurriculum(t.slug);
+        const used = new Set(getAllPostFiles().map(parsePostFile).filter((p) => p.topic === t.slug && p.lesson).map((p) => p.lesson));
+        const lessons = c ? allLessons(c) : [];
+        return { ...t, lessons: lessons.length, done: lessons.filter((l) => used.has(l.id)).length, daysLeft: empty[t.slug] ?? null, hasCurriculum: !!c };
+      });
+    })(),
     tools: {
       claude: hasClaude,
       naverAd: !!(process.env.NAVER_AD_API_KEY && process.env.NAVER_AD_SECRET && process.env.NAVER_AD_CUSTOMER_ID),
@@ -186,7 +214,7 @@ function safeSlug(slug: string): string {
 }
 
 function topicOrThrow(slug: string | null) {
-  const topic = slug ? getTopic(slug) : undefined;
+  const topic = slug ? readCategories().topics.find((t) => t.slug === slug) : undefined;
   if (!topic) throw new HttpError(400, "알 수 없는 주제입니다");
   return topic;
 }
@@ -213,7 +241,113 @@ async function readJson<T>(req: http.IncomingMessage): Promise<T> {
 type Handler = (req: http.IncomingMessage, url: URL, params: string[]) => Promise<unknown> | unknown;
 const routes: [string, RegExp, Handler][] = [
   ["GET", /^\/api\/status$/, () => status()],
-  ["GET", /^\/api\/topics$/, () => TOPICS],
+  ["GET", /^\/api\/topics$/, () => readCategories().topics],
+
+  // 카테고리
+  [
+    "GET",
+    /^\/api\/categories$/,
+    () => {
+      const data = readCategories();
+      const posts = getAllPostFiles().map(parsePostFile);
+      return { ...data, topics: data.topics.map((t) => ({ ...t, posts: posts.filter((p) => p.topic === t.slug).length })) };
+    },
+  ],
+  [
+    "PUT",
+    /^\/api\/categories$/,
+    async (req) => {
+      const body = await readJson<Categories>(req);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(body.startDate ?? "")) throw new HttpError(400, "시작일 형식이 잘못됐습니다");
+      if (!Array.isArray(body.topics) || !body.topics.length) throw new HttpError(400, "카테고리가 하나 이상 있어야 합니다");
+      const topics = body.topics.map((t) => ({
+        slug: String(t.slug ?? "").trim(),
+        name: String(t.name ?? "").trim(),
+        description: String(t.description ?? "").trim(),
+        color: String(t.color ?? "").trim(),
+      }));
+      for (const t of topics) {
+        if (!/^[a-z0-9][a-z0-9-]{1,29}$/.test(t.slug)) throw new HttpError(400, `주소용 영문 이름이 잘못됐습니다: "${t.slug}" (영어 소문자·숫자·하이픈 2~30자)`);
+        if (!t.name) throw new HttpError(400, `이름이 비어 있는 카테고리가 있습니다 (${t.slug})`);
+        if (!/^#[0-9a-fA-F]{6}$/.test(t.color)) throw new HttpError(400, `색상 형식이 잘못됐습니다 (${t.name})`);
+      }
+      if (new Set(topics.map((t) => t.slug)).size !== topics.length) throw new HttpError(400, "주소용 영문 이름이 겹칩니다");
+      // 글이 있는 카테고리를 지우면 그 글들이 갈 곳이 없어집니다.
+      const posts = getAllPostFiles().map(parsePostFile);
+      const removed = readCategories().topics.filter((old) => !topics.some((t) => t.slug === old.slug));
+      const blocked = removed.filter((t) => posts.some((p) => p.topic === t.slug));
+      if (blocked.length) throw new HttpError(409, `글이 있는 카테고리는 지울 수 없습니다: ${blocked.map((t) => t.name).join(", ")}`);
+      fs.writeFileSync(CATEGORIES_FILE, `${JSON.stringify({ startDate: body.startDate, topics }, null, 2)}\n`);
+      return readCategories();
+    },
+  ],
+
+  // 커리큘럼
+  [
+    "GET",
+    /^\/api\/curriculum$/,
+    (_req, url) => {
+      const topic = topicOrThrow(url.searchParams.get("topic"));
+      const curriculum = readCurriculum(topic.slug);
+      const today = todayString();
+      const posts = getAllPostFiles().map(parsePostFile).filter((p) => p.topic === topic.slug && p.lesson);
+      // 레슨별 상태: 글이 있으면 그 글, 없으면 달력에 배정된 날짜
+      const planned = new Map(
+        schedule(today, addDays(today, 730))
+          .filter((d) => d.topic?.slug === topic.slug && d.lesson && !d.post)
+          .map((d) => [d.lesson!.id, d.date]),
+      );
+      const lessonStatus = Object.fromEntries(
+        (curriculum ? allLessons(curriculum) : []).map((l) => {
+          const post = posts.find((p) => p.lesson === l.id);
+          if (post) return [l.id, { status: post.draft ? "작성 중" : "완료", date: post.date, slug: post.slug }];
+          return [l.id, planned.has(l.id) ? { status: "예정", date: planned.get(l.id) } : { status: "미배정" }];
+        }),
+      );
+      return { topic, curriculum, lessonStatus };
+    },
+  ],
+  [
+    "PUT",
+    /^\/api\/curriculum$/,
+    async (req, url) => {
+      const topic = topicOrThrow(url.searchParams.get("topic"));
+      const body = await readJson<Curriculum>(req);
+      const used = getAllPostFiles().map(parsePostFile).filter((p) => p.topic === topic.slug && p.lesson).map((p) => p.lesson!);
+      const ids = new Set((body.stages ?? []).flatMap((s) => (s.lessons ?? []).map((l) => l.id)));
+      const lost = used.filter((id) => !ids.has(id));
+      if (lost.length) throw new HttpError(409, "이미 글로 쓴 레슨은 지울 수 없습니다");
+      try {
+        return writeCurriculum(topic.slug, { ...body, topic: topic.slug });
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/curriculum\/generate$/,
+    async (req) => {
+      const { topic, lessons, append } = await readJson<{ topic: string; lessons?: number; append?: boolean }>(req);
+      const t = topicOrThrow(topic);
+      const n = String(Math.min(60, Math.max(5, Number(lessons) || 30)));
+      const args = ["--topic", t.slug, ...(append ? ["--append", n] : ["--lessons", n])];
+      return startJob("curriculum", `커리큘럼: ${t.name} ${append ? `레슨 ${n}개 추가` : "설계"}`, "curriculum", args, [t.slug]);
+    },
+  ],
+
+  // 달력
+  [
+    "GET",
+    /^\/api\/calendar$/,
+    (_req, url) => {
+      const month = url.searchParams.get("month") ?? todayString().slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, "월 형식이 잘못됐습니다");
+      const from = `${month}-01`;
+      const to = addDays(addDays(from, 31).slice(0, 7) + "-01", -1);
+      return { month, today: todayString(), days: schedule(from, to) };
+    },
+  ],
 
   // 시장 분석
   ["GET", /^\/api\/research$/, () => researchResults()],
@@ -246,40 +380,6 @@ const routes: [string, RegExp, Handler][] = [
       fs.mkdirSync(RESEARCH_DIR, { recursive: true });
       fs.writeFileSync(PROFILE, text);
       return { ok: true };
-    },
-  ],
-
-  // 콘텐츠 계획
-  [
-    "GET",
-    /^\/api\/plan$/,
-    (_req, url) => {
-      const topic = topicOrThrow(url.searchParams.get("topic"));
-      return { topic, pending: pendingItems(planPath(topic)), done: doneItems(planPath(topic)) };
-    },
-  ],
-  [
-    "PUT",
-    /^\/api\/plan$/,
-    async (req, url) => {
-      const topic = topicOrThrow(url.searchParams.get("topic"));
-      const { pending } = await readJson<{ pending: PlanItem[] }>(req);
-      if (!Array.isArray(pending) || pending.some((i) => !i.title?.trim() || !Array.isArray(i.details))) {
-        throw new HttpError(400, "계획 항목 형식이 잘못됐습니다");
-      }
-      if (!fs.existsSync(planPath(topic))) createPlanFile(topic);
-      savePending(planPath(topic), pending);
-      return { pending: pendingItems(planPath(topic)) };
-    },
-  ],
-  [
-    "POST",
-    /^\/api\/plan\/generate$/,
-    async (req) => {
-      const { topic, count } = await readJson<{ topic: string; count?: number }>(req);
-      const t = topicOrThrow(topic);
-      const n = String(Math.min(50, Math.max(5, Number(count) || 20)));
-      return startJob("plan", `계획: ${t.name} ${n}개`, "plan", ["--topic", t.slug, "--count", n]);
     },
   ],
 

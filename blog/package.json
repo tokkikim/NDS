@@ -13,9 +13,9 @@
     "new": "tsx scripts/new-post.ts",
     "draft": "tsx scripts/ai-draft.ts",
     "research": "tsx scripts/research.ts",
-    "plan": "tsx scripts/plan.ts",
     "naver": "tsx scripts/naver.ts",
-    "admin": "tsx admin/server.ts"
+    "admin": "tsx admin/server.ts",
+    "curriculum": "tsx scripts/curriculum.ts"
   },
   "dependencies": {
     "gray-matter": "^4.0.3",

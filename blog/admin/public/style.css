@@ -399,3 +399,96 @@ dialog::backdrop {
   border-radius: 999px;
   font-size: 0.9rem;
 }
+
+/* 할 일·진행률 */
+.task {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.progress {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+}
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.b-today {
+  color: var(--accent);
+}
+.b-plan {
+  color: var(--muted);
+}
+
+/* 다음 7일 */
+.week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+.week-day {
+  cursor: pointer;
+  padding: 10px;
+}
+@media (max-width: 800px) {
+  .week {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* 달력 */
+.calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+.cal-head {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.cal-day {
+  min-height: 104px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.cal-day:hover {
+  border-color: var(--accent);
+}
+.cal-day .badge {
+  font-size: 0.68rem;
+  padding: 0 5px;
+}
+.cal-day.is-past {
+  opacity: 0.7;
+}
+.cal-day.is-today {
+  outline: 2px solid var(--accent);
+  opacity: 1;
+}
+@media (max-width: 700px) {
+  .cal-day {
+    min-height: 64px;
+    padding: 4px;
+  }
+  .cal-day .clamp,
+  .cal-day .badge {
+    display: none;
+  }
+}

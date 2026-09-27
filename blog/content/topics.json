@@ -1,0 +1,23 @@
+{
+  "startDate": "2026-09-28",
+  "topics": [
+    {
+      "slug": "money",
+      "name": "경제·재테크 공부",
+      "description": "경제 개념과 재테크 제도를 공부하고 내 돈에 직접 적용해 봅니다.",
+      "color": "#0f9d74"
+    },
+    {
+      "slug": "marathon",
+      "name": "마라톤",
+      "description": "달리기 입문부터 대회 완주까지, 훈련하고 기록합니다.",
+      "color": "#e0703a"
+    },
+    {
+      "slug": "english",
+      "name": "영어 공부",
+      "description": "실제로 써먹을 표현을 익히고 직접 말하고 써 봅니다.",
+      "color": "#3b6fe0"
+    }
+  ]
+}

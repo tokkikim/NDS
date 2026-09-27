@@ -28,6 +28,8 @@ export type Post = {
   draft: boolean;
   affiliate: boolean;
   sources: Source[];
+  /** 커리큘럼 레슨 id (content/curriculum/<주제>.json) */
+  lesson?: string;
   content: string;
   readingMinutes: number;
 };
@@ -53,6 +55,7 @@ export function parsePostFile(file: string): Post {
     draft: data.draft === true,
     affiliate: data.affiliate === true,
     sources: Array.isArray(data.sources) ? (data.sources as Source[]) : [],
+    lesson: data.lesson ? String(data.lesson) : undefined,
     content,
     // 한국어 기준 분당 약 500자
     readingMinutes: Math.max(1, Math.round(chars / 500)),

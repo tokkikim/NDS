@@ -8,7 +8,7 @@ const CRITERIA = [
   ["breadth", "확장성"],
   ["fit", "적합성"],
 ];
-const state = { tab: "home", topics: [], planTopic: null, openPost: null, watching: new Set() };
+const state = { tab: "home", topics: [], curTopic: null, month: null, pendingCategory: null, openPost: null, watching: new Set() };
 
 // ── 도우미 ────────────────────────────────────────────────────────────────
 
@@ -111,52 +111,105 @@ async function showJob(id) {
   modal(job.label, h("pre", { class: "log" }, job.log || "(아직 출력 없음)"));
 }
 
+// ── 일정 공통 ──────────────────────────────────────────────────────────────
+
+const STATUS_CLASS = { 게시: "b-go", 완료: "b-go", 예약: "b-go", 초안: "b-hold", "작성 중": "b-hold", 오늘: "b-today", 예정: "b-plan", 놓침: "b-no", "레슨 없음": "b-no", 미배정: "b-plan", "시작 전": "b-plan" };
+const statusBadge = (s) => h("span", { class: `badge ${STATUS_CLASS[s] ?? ""}` }, s);
+const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
+
+const createDraft = (body) => run(async () => watchJob(await api("/api/draft", { method: "POST", body })));
+
+/** 하루치 할 일 카드 (홈·달력에서 공통 사용) */
+function dayDetail(d, { compact = false } = {}) {
+  const topic = d.topic;
+  const l = d.lesson;
+  const canDraft = topic && !d.post && ["오늘", "예정", "놓침"].includes(d.status);
+  return h(
+    "div",
+    { class: "stack" },
+    h("div", { class: "row" }, topic ? h("span", { class: "badge", style: `color:${topic.color}` }, topic.name) : null, statusBadge(d.status), h("span", { class: "muted small" }, `${d.date} (${weekday(d.date)})`)),
+    l ? h("div", { class: "muted small" }, `${l.stage} · 레슨 ${l.number}/${l.total}`) : null,
+    d.post ? h("strong", {}, d.post.title) : l ? h("strong", {}, l.title) : null,
+    l ? h("div", { class: "task" }, h("div", { class: "small muted" }, "할 일"), l.task) : null,
+    l && l.keywords.length && !compact ? h("div", { class: "small muted" }, `키워드: ${l.keywords.join(", ")}`) : null,
+    d.status === "레슨 없음" ? h("div", { class: "small b-no" }, "커리큘럼 레슨이 모두 배정됐습니다. 커리큘럼 탭에서 레슨을 추가하세요.") : null,
+    d.status === "놓침" ? h("div", { class: "small muted" }, "이 날의 레슨은 다음 차례로 자동으로 밀렸습니다.") : null,
+    h(
+      "div",
+      { class: "row" },
+      d.post ? h("button", { class: "ghost", onclick: () => (document.getElementById("modal").close(), openPost(d.post.slug)) }, "글 열기") : null,
+      canDraft ? h("button", { class: "primary", onclick: () => (document.getElementById("modal").close(), createDraft({ date: d.date, topic: topic.slug })) }, "AI 초안 만들기") : null,
+      canDraft ? h("button", { class: "ghost", onclick: () => (document.getElementById("modal").close(), createDraft({ date: d.date, topic: topic.slug, mode: "template" })) }, "빈 템플릿") : null,
+    ),
+  );
+}
+
 // ── 홈 ─────────────────────────────────────────────────────────────────────
 
 async function renderHome() {
   const s = await api("/api/status");
-  const today = s.todayPost;
   const tool = (ok, label, hint) => h("div", {}, h("span", { class: `dot ${ok ? "ok" : "off"}` }), label, ok ? null : h("div", { class: "muted small" }, hint));
 
   return h(
     "div",
     { class: "stack" },
-    h("h2", {}, `오늘 ${s.today}`),
+    h("h2", {}, `오늘 ${s.today} (${weekday(s.today)})`),
     h(
       "div",
       { class: "grid" },
+      h(
+        "div",
+        { class: "card", style: `grid-column: span 2; border-left: 4px solid ${s.todayPlan?.topic?.color ?? "var(--border)"}` },
+        s.todayPlan?.status === "시작 전"
+          ? (() => {
+              const first = s.week.find((d) => d.topic);
+              return first
+                ? h("div", { class: "stack" }, h("strong", {}, `${first.date} (${weekday(first.date)})부터 시작합니다. 첫날 할 일:`), dayDetail(first))
+                : h("div", {}, "카테고리 탭에서 순환 시작일을 확인하세요.");
+            })()
+          : s.todayPlan
+            ? dayDetail(s.todayPlan)
+            : "일정 없음",
+      ),
       h(
         "div",
         { class: "card stack" },
-        h("div", { class: "muted small" }, "오늘의 주제"),
-        h("div", { class: "big", style: `color:${s.todayTopic.color}` }, s.todayTopic.name),
-        today
-          ? h("div", { class: "row" }, h("span", { class: `badge b-${today.status}` }, today.status), h("a", { href: "#", onclick: (e) => (e.preventDefault(), openPost(today.slug)) }, today.title))
-          : h(
-              "div",
-              { class: "row" },
-              h("button", { class: "primary", onclick: () => run(async () => watchJob(await api("/api/draft", { method: "POST", body: {} }))) }, "AI 초안 만들기"),
-              h("button", { class: "ghost", onclick: () => run(async () => watchJob(await api("/api/draft", { method: "POST", body: { mode: "template" } }))) }, "빈 템플릿"),
-            ),
-      ),
-      h("div", { class: "card" }, h("div", { class: "muted small" }, "연속 공부"), h("div", { class: "big" }, `${s.streak}일`)),
-      h(
-        "div",
-        { class: "card" },
-        h("div", { class: "muted small" }, "글 현황"),
-        h("div", { class: "row", style: "margin-top:6px" }, ...Object.entries(s.counts).map(([k, v]) => h("span", { class: `badge b-${k}` }, `${k} ${v}`))),
+        h("div", {}, h("div", { class: "muted small" }, "연속 공부"), h("div", { class: "big" }, `${s.streak}일`)),
+        h("div", { class: "row" }, ...Object.entries(s.counts).map(([k, v]) => h("span", { class: `badge b-${k}` }, `${k} ${v}`))),
       ),
     ),
-    h("h3", {}, "주제별 계획"),
+    h("h3", {}, "다음 7일"),
+    h(
+      "div",
+      { class: "week" },
+      ...s.week.map((d) =>
+        h(
+          "div",
+          { class: "card week-day", style: `border-top: 4px solid ${d.topic?.color ?? "var(--border)"}`, onclick: () => modal(`${d.date} 할 일`, dayDetail(d)) },
+          h("div", { class: "muted small" }, `${d.date.slice(5)} (${weekday(d.date)})`),
+          h("div", { class: "small", style: `color:${d.topic?.color ?? "inherit"};font-weight:700` }, d.topic?.name ?? ""),
+          h("div", { class: "small clamp" }, d.post?.title ?? d.lesson?.title ?? d.status),
+        ),
+      ),
+    ),
+    h("h3", {}, "커리큘럼 진행"),
     h(
       "div",
       { class: "grid" },
-      ...s.plans.map((p) =>
+      ...s.curricula.map((c) =>
         h(
           "div",
-          { class: "card", style: `border-left:4px solid ${p.color};cursor:pointer`, onclick: () => ((state.planTopic = p.slug), go("plan")) },
-          h("strong", {}, p.name),
-          h("div", { class: p.pending < 5 ? "small b-no" : "muted small" }, `대기 ${p.pending} · 완료 ${p.done}${p.pending < 5 ? " — 계획을 보충하세요" : ""}`),
+          { class: "card", style: `border-left:4px solid ${c.color};cursor:pointer`, onclick: () => ((state.curTopic = c.slug), go("curriculum")) },
+          h("strong", {}, c.name),
+          c.hasCurriculum
+            ? h(
+                "div",
+                { class: "stack" },
+                h("div", { class: "progress" }, h("span", { style: `width:${c.lessons ? (c.done / c.lessons) * 100 : 0}%;background:${c.color}` })),
+                h("div", { class: c.daysLeft !== null && c.daysLeft < 21 ? "small b-no" : "muted small" }, `레슨 ${c.done}/${c.lessons}${c.daysLeft !== null ? ` · ${c.daysLeft}일 뒤 레슨 소진` : ""}`),
+              )
+            : h("div", { class: "small b-no" }, "커리큘럼이 없습니다 — 만들어 주세요"),
         ),
       ),
     ),
@@ -167,8 +220,303 @@ async function renderHome() {
       tool(s.tools.claude, "Claude CLI", "npm i -g @anthropic-ai/claude-code 후 claude로 로그인"),
       tool(s.tools.naverAd, "네이버 검색광고 API (검색량)", ".env.local에 NAVER_AD_* 키 입력 후 대시보드 재시작"),
       tool(s.tools.naverDatalab, "네이버 데이터랩 (추세)", ".env.local에 NAVER_CLIENT_* 키 입력 후 대시보드 재시작"),
-      tool(s.tools.profile, "운영자 프로필", "프로필 탭에서 작성하면 적합성 점수가 정확해집니다"),
+      tool(s.tools.profile, "운영자 프로필", "프로필 탭에서 작성하면 분석·커리큘럼이 내 수준에 맞춰집니다"),
     ),
+  );
+}
+
+// ── 달력 ───────────────────────────────────────────────────────────────────
+
+async function renderCalendar() {
+  const today = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7);
+  state.month ??= today;
+  const cal = await api(`/api/calendar?month=${state.month}`);
+  const shift = (n) => {
+    const [y, m] = state.month.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + n, 1));
+    state.month = d.toISOString().slice(0, 7);
+    render(true);
+  };
+  const lead = new Date(`${cal.days[0].date}T00:00:00Z`).getUTCDay();
+  const counts = cal.days.reduce((acc, d) => ((acc[d.status] = (acc[d.status] ?? 0) + 1), acc), {});
+
+  return h(
+    "div",
+    { class: "stack" },
+    h(
+      "div",
+      { class: "row", style: "justify-content:space-between" },
+      h("h2", { style: "margin:0" }, `${state.month.replace("-", "년 ")}월`),
+      h("div", { class: "row" }, h("button", { class: "ghost", onclick: () => shift(-1) }, "‹ 이전"), h("button", { class: "ghost", onclick: () => ((state.month = today), render(true)) }, "이번 달"), h("button", { class: "ghost", onclick: () => shift(1) }, "다음 ›")),
+    ),
+    h("div", { class: "row small muted" }, ...Object.entries(counts).map(([k, v]) => h("span", {}, statusBadge(k), ` ${v}일`))),
+    h(
+      "div",
+      { class: "calendar" },
+      ...WEEKDAYS.map((w) => h("div", { class: "cal-head" }, w)),
+      ...Array.from({ length: lead }, () => h("div", {})),
+      ...cal.days.map((d) =>
+        h(
+          "div",
+          {
+            class: `cal-day${d.date === cal.today ? " is-today" : ""}${d.date < cal.today ? " is-past" : ""}`,
+            style: d.topic ? `border-top: 4px solid ${d.topic.color}` : "",
+            onclick: () => modal(`${d.date} (${weekday(d.date)}) 할 일`, dayDetail(d)),
+          },
+          h("div", { class: "row", style: "justify-content:space-between" }, h("strong", {}, Number(d.date.slice(8))), d.topic ? statusBadge(d.status) : null),
+          d.topic ? h("div", { class: "small", style: `color:${d.topic.color};font-weight:700` }, d.topic.name) : null,
+          h("div", { class: "small clamp" }, d.post?.title ?? d.lesson?.title ?? ""),
+        ),
+      ),
+    ),
+    h("p", { class: "muted small" }, "날짜를 누르면 그날의 할 일을 보고 초안을 만들 수 있습니다. 지난 날 글을 쓰지 못하면 그 레슨은 같은 카테고리의 다음 차례로 자동으로 밀립니다."),
+  );
+}
+
+// ── 카테고리 ───────────────────────────────────────────────────────────────
+
+async function renderCategories() {
+  const data = await api("/api/categories");
+  const rows = data.topics.map((t) => ({ ...t, isNew: false }));
+  if (state.pendingCategory) {
+    rows.push({ slug: "", name: state.pendingCategory.name, description: state.pendingCategory.description, color: "#7a5af8", posts: 0, isNew: true });
+    state.pendingCategory = null;
+    toast("시장분석 주제를 새 카테고리로 추가했습니다. 영문 주소 이름을 정하고 저장하세요");
+  }
+  const start = h("input", { type: "date", value: data.startDate });
+  const list = h("div", { class: "stack" });
+
+  const draw = () =>
+    list.replaceChildren(
+      ...rows.map((t, i) =>
+        h(
+          "div",
+          { class: "plan-item" },
+          h("span", { class: "num" }, i + 1),
+          h("input", { type: "color", value: t.color, oninput: (e) => (t.color = e.target.value) }),
+          h(
+            "div",
+            { class: "body stack" },
+            h(
+              "div",
+              { class: "row" },
+              h("input", { type: "text", value: t.name, placeholder: "이름 (예: 마라톤)", oninput: (e) => (t.name = e.target.value) }),
+              h("input", { type: "text", value: t.slug, placeholder: "주소용 영문 (예: marathon)", readOnly: !t.isNew, title: t.isNew ? "" : "만든 뒤에는 바꿀 수 없습니다 (글·커리큘럼 주소)", style: "max-width:200px", oninput: (e) => (t.slug = e.target.value.trim()) }),
+            ),
+            h("input", { type: "text", value: t.description, placeholder: "한 줄 설명 (블로그 카테고리 페이지에 표시)", style: "width:100%", oninput: (e) => (t.description = e.target.value) }),
+            h("div", { class: "muted small" }, `글 ${t.posts ?? 0}개${t.isNew ? " · 새 카테고리" : ""}`),
+          ),
+          h(
+            "div",
+            { class: "actions" },
+            h("button", { class: "icon", disabled: i === 0, onclick: () => ([rows[i - 1], rows[i]] = [rows[i], rows[i - 1]], draw()) }, "↑"),
+            h("button", { class: "icon", disabled: i === rows.length - 1, onclick: () => ([rows[i + 1], rows[i]] = [rows[i], rows[i + 1]], draw()) }, "↓"),
+            h("button", { class: "icon", disabled: t.posts > 0, title: t.posts > 0 ? "글이 있는 카테고리는 지울 수 없습니다" : "삭제", onclick: () => confirm(`"${t.name}" 카테고리를 지울까요?`) && (rows.splice(i, 1), draw()) }, "✕"),
+          ),
+        ),
+      ),
+    );
+  draw();
+
+  const save = () =>
+    run(async () => {
+      await api("/api/categories", { method: "PUT", body: { startDate: start.value, topics: rows.map(({ slug, name, description, color }) => ({ slug, name, description, color })) } });
+      state.topics = await api("/api/topics");
+      toast("저장했습니다");
+      render(true);
+    });
+
+  return h(
+    "div",
+    { class: "stack" },
+    h("h2", {}, "카테고리"),
+    h("p", { class: "muted small" }, "위에서부터 순서대로 하루씩 돌아가며 씁니다. 시작일이 첫 번째 카테고리의 날입니다. 순서·시작일을 바꾸면 오늘 이후 달력이 다시 계산됩니다."),
+    h("div", { class: "card row" }, h("span", {}, "순환 시작일"), start),
+    list,
+    h(
+      "div",
+      { class: "row" },
+      h("button", { class: "ghost", onclick: () => (rows.push({ slug: "", name: "", description: "", color: "#7a5af8", posts: 0, isNew: true }), draw()) }, "+ 카테고리 추가"),
+      h("button", { class: "primary", onclick: save }, "저장"),
+    ),
+  );
+}
+
+// ── 커리큘럼 ───────────────────────────────────────────────────────────────
+
+async function renderCurriculum() {
+  if (!state.topics.some((t) => t.slug === state.curTopic)) state.curTopic = state.topics[0]?.slug;
+  const { topic, curriculum, lessonStatus } = await api(`/api/curriculum?topic=${state.curTopic}`);
+  const tabs = h("div", { class: "row" }, ...state.topics.map((t) => h("button", { class: t.slug === state.curTopic ? "primary" : "ghost", onclick: () => ((state.curTopic = t.slug), render(true)) }, t.name)));
+  const count = h("input", { type: "number", value: 30, min: 5, max: 60, style: "width:80px" });
+  const generate = (append) =>
+    run(async () => {
+      if (!append && curriculum && !confirm("커리큘럼을 AI로 다시 설계할까요? 이미 글로 쓴 레슨은 그대로 유지됩니다.")) return;
+      watchJob(await api("/api/curriculum/generate", { method: "POST", body: { topic: topic.slug, lessons: Number(count.value), append } }));
+    });
+
+  if (!curriculum) {
+    return h(
+      "div",
+      { class: "stack" },
+      h("h2", {}, "커리큘럼"),
+      tabs,
+      h(
+        "div",
+        { class: "card stack" },
+        h("strong", {}, `${topic.name} 커리큘럼이 아직 없습니다`),
+        h("div", { class: "muted small" }, "AI가 프로필·시장분석·검색 데이터를 보고 단계별 레슨을 설계합니다. 레슨 1개 = 글 1편 = 카테고리 차례 사이의 실천입니다."),
+        h("div", { class: "row" }, h("span", {}, "레슨"), count, h("span", {}, "개로"), h("button", { class: "primary", onclick: () => generate(false) }, "AI로 커리큘럼 만들기")),
+        h("button", { class: "ghost", onclick: () => save({ topic: topic.slug, goal: "", level: "", stages: [{ title: "1단계", goal: "", lessons: [] }] }) }, "직접 만들기 (빈 커리큘럼)"),
+      ),
+    );
+  }
+
+  const c = structuredClone(curriculum);
+  async function save(next) {
+    await run(async () => {
+      await api(`/api/curriculum?topic=${topic.slug}`, { method: "PUT", body: next });
+      render(true);
+    });
+  }
+  const lessons = c.stages.flatMap((s) => s.lessons);
+  const st = (id) => lessonStatus[id] ?? { status: "미배정" };
+  const done = lessons.filter((l) => st(l.id).status === "완료").length;
+  const writing = lessons.filter((l) => st(l.id).status === "작성 중").length;
+  const lastDate = lessons.map((l) => st(l.id).date).filter(Boolean).sort().pop();
+
+  const editLesson = (stage, i) => {
+    const l = stage.lessons[i] ?? { id: "", title: "", task: "", keywords: [] };
+    const title = h("input", { type: "text", value: l.title, style: "width:100%" });
+    const task = h("textarea", { rows: 4, value: l.task });
+    const keywords = h("input", { type: "text", value: l.keywords.join(", "), style: "width:100%" });
+    modal(
+      i < stage.lessons.length ? "레슨 수정" : "레슨 추가",
+      h(
+        "div",
+        { class: "stack", style: "padding-top:12px" },
+        h("label", { class: "small muted" }, "제목 (글 제목 후보)"),
+        title,
+        h("label", { class: "small muted" }, "할 일 (다음 차례까지 실제로 할 것)"),
+        task,
+        h("label", { class: "small muted" }, "키워드 (쉼표로 구분)"),
+        keywords,
+        h(
+          "button",
+          {
+            class: "primary",
+            onclick: () => {
+              stage.lessons[i] = { id: l.id, title: title.value, task: task.value, keywords: keywords.value.split(",").map((k) => k.trim()).filter(Boolean) };
+              document.getElementById("modal").close();
+              save(c);
+            },
+          },
+          "저장",
+        ),
+      ),
+    );
+  };
+  const editStage = (si) => {
+    const s = c.stages[si] ?? { title: `${c.stages.length + 1}단계: `, goal: "", lessons: [] };
+    const title = h("input", { type: "text", value: s.title, style: "width:100%" });
+    const goal = h("input", { type: "text", value: s.goal, style: "width:100%" });
+    modal(
+      si < c.stages.length ? "단계 수정" : "단계 추가",
+      h(
+        "div",
+        { class: "stack", style: "padding-top:12px" },
+        h("label", { class: "small muted" }, "단계 이름"),
+        title,
+        h("label", { class: "small muted" }, "단계 목표"),
+        goal,
+        h("button", { class: "primary", onclick: () => ((c.stages[si] = { ...s, title: title.value, goal: goal.value }), document.getElementById("modal").close(), save(c)) }, "저장"),
+      ),
+    );
+  };
+  const editGoal = () => {
+    const goal = h("input", { type: "text", value: c.goal, style: "width:100%" });
+    const level = h("input", { type: "text", value: c.level, style: "width:100%" });
+    modal(
+      "커리큘럼 목표",
+      h(
+        "div",
+        { class: "stack", style: "padding-top:12px" },
+        h("label", { class: "small muted" }, "최종 목표"),
+        goal,
+        h("label", { class: "small muted" }, "출발 수준"),
+        level,
+        h("button", { class: "primary", onclick: () => ((c.goal = goal.value), (c.level = level.value), document.getElementById("modal").close(), save(c)) }, "저장"),
+      ),
+    );
+  };
+
+  let n = 0;
+  return h(
+    "div",
+    { class: "stack" },
+    h("h2", {}, "커리큘럼"),
+    tabs,
+    h(
+      "div",
+      { class: "card stack", style: `border-left:4px solid ${topic.color}` },
+      h("div", { class: "row", style: "justify-content:space-between" }, h("strong", {}, c.goal || "(목표 없음)"), h("button", { class: "icon", onclick: editGoal }, "✎ 목표 수정")),
+      h("div", { class: "muted small" }, `출발 수준: ${c.level || "-"}`),
+      h("div", { class: "progress" }, h("span", { style: `width:${lessons.length ? (done / lessons.length) * 100 : 0}%;background:${topic.color}` })),
+      h("div", { class: "small" }, `레슨 ${lessons.length}개 · 완료 ${done} · 작성 중 ${writing}${lastDate ? ` · 예상 종료 ${lastDate}` : ""}`),
+      h(
+        "div",
+        { class: "row" },
+        h("span", { class: "small" }, "AI로 레슨"),
+        count,
+        h("span", { class: "small" }, "개"),
+        h("button", { class: "ghost", onclick: () => generate(true) }, "이어서 추가"),
+        h("button", { class: "ghost", onclick: () => generate(false) }, "다시 설계"),
+      ),
+    ),
+    ...c.stages.map((s, si) =>
+      h(
+        "div",
+        { class: "stack" },
+        h(
+          "div",
+          { class: "row", style: "justify-content:space-between;margin-top:18px" },
+          h("div", {}, h("h3", { style: "margin:0" }, s.title), s.goal ? h("div", { class: "muted small" }, `목표: ${s.goal}`) : null),
+          h(
+            "div",
+            { class: "row" },
+            h("button", { class: "icon", onclick: () => editStage(si) }, "✎"),
+            h("button", { class: "icon", disabled: s.lessons.some((l) => st(l.id).status === "완료" || st(l.id).status === "작성 중"), title: "단계 삭제", onclick: () => confirm(`"${s.title}" 단계와 레슨 ${s.lessons.length}개를 지울까요?`) && (c.stages.splice(si, 1), save(c)) }, "✕"),
+          ),
+        ),
+        ...s.lessons.map((l, i) => {
+          const info = st(l.id);
+          const locked = info.status === "완료" || info.status === "작성 중";
+          n++;
+          return h(
+            "div",
+            { class: "plan-item" },
+            h("span", { class: "num" }, n),
+            h(
+              "div",
+              { class: "body" },
+              h("div", { class: "row" }, h("strong", {}, l.title), statusBadge(info.status), info.date ? h("span", { class: "muted small" }, `${info.date} (${weekday(info.date)})`) : null),
+              h("div", { class: "small" }, `할 일: ${l.task}`),
+              l.keywords.length ? h("div", { class: "muted small" }, l.keywords.join(" · ")) : null,
+            ),
+            h(
+              "div",
+              { class: "actions" },
+              h("button", { class: "icon", disabled: i === 0, onclick: () => ([s.lessons[i - 1], s.lessons[i]] = [s.lessons[i], s.lessons[i - 1]], save(c)) }, "↑"),
+              h("button", { class: "icon", disabled: i === s.lessons.length - 1, onclick: () => ([s.lessons[i + 1], s.lessons[i]] = [s.lessons[i], s.lessons[i + 1]], save(c)) }, "↓"),
+              h("button", { class: "icon", onclick: () => editLesson(s, i) }, "✎"),
+              h("button", { class: "icon", disabled: locked, title: locked ? "글로 쓴 레슨은 지울 수 없습니다" : "삭제", onclick: () => confirm(`"${l.title}" 레슨을 지울까요?`) && (s.lessons.splice(i, 1), save(c)) }, "✕"),
+            ),
+          );
+        }),
+        h("button", { class: "ghost small", style: "align-self:flex-start", onclick: () => editLesson(s, s.lessons.length) }, "+ 레슨 추가"),
+      ),
+    ),
+    h("button", { class: "ghost", onclick: () => editStage(c.stages.length) }, "+ 단계 추가"),
   );
 }
 
@@ -251,6 +599,21 @@ async function renderResearch() {
                         },
                         busy.has(r.topic) ? "분석 중…" : "재분석",
                       ),
+                      state.topics.some((t) => t.name === r.topic)
+                        ? null
+                        : h(
+                            "button",
+                            {
+                              class: "ghost small",
+                              style: "white-space:nowrap;margin-top:4px",
+                              onclick: (e) => {
+                                e.stopPropagation();
+                                state.pendingCategory = { name: r.topic, description: r.summary.split(/(?<=[.다])\s/)[0].slice(0, 80) };
+                                go("categories");
+                              },
+                            },
+                            "카테고리로 등록",
+                          ),
                     ),
                   ),
                 ),
@@ -265,89 +628,6 @@ async function renderResearch() {
 async function openReport(row) {
   const { html } = await api(`/api/research/report?file=${encodeURIComponent(row.report)}`);
   modal(`${row.topic} — ${row.total}점 ${row.verdict}`, htmlBlock(html));
-}
-
-// ── 계획 ───────────────────────────────────────────────────────────────────
-
-async function renderPlan() {
-  state.planTopic ??= state.topics[0]?.slug;
-  const plan = await api(`/api/plan?topic=${state.planTopic}`);
-  let items = plan.pending;
-
-  const save = async (next) => {
-    const r = await api(`/api/plan?topic=${state.planTopic}`, { method: "PUT", body: { pending: next } });
-    items = r.pending;
-    list.replaceChildren(...itemsView());
-    heading.textContent = headingText();
-  };
-  const headingText = () => `대기 ${items.length}개 — 맨 위부터 초안으로 씁니다`;
-  const heading = h("h3", {}, headingText());
-  const move = (i, d) => {
-    const next = [...items];
-    [next[i], next[i + d]] = [next[i + d], next[i]];
-    run(() => save(next));
-  };
-  const remove = (i) => confirm(`"${items[i].title}" 소재를 계획에서 뺄까요?`) && run(() => save(items.filter((_, j) => j !== i)));
-
-  const itemsView = () =>
-    items.length
-      ? items.map((it, i) =>
-          h(
-            "div",
-            { class: "plan-item" },
-            h("span", { class: "num" }, i + 1),
-            h("div", { class: "body" }, h("strong", {}, it.title), it.details.length ? h("ul", {}, ...it.details.map((d) => h("li", {}, d))) : null),
-            h(
-              "div",
-              { class: "actions" },
-              h("button", { class: "icon", title: "위로", disabled: i === 0, onclick: () => move(i, -1) }, "↑"),
-              h("button", { class: "icon", title: "아래로", disabled: i === items.length - 1, onclick: () => move(i, 1) }, "↓"),
-              h("button", { class: "icon", title: "맨 위로 (다음 초안 소재)", disabled: i === 0, onclick: () => run(() => save([it, ...items.filter((_, j) => j !== i)])) }, "⤒"),
-              h("button", { class: "icon", title: "빼기", onclick: () => remove(i) }, "✕"),
-            ),
-          ),
-        )
-      : [h("p", { class: "muted" }, "대기 중인 소재가 없습니다. AI로 추가하거나 직접 추가하세요.")];
-  const list = h("div", { class: "stack" }, ...itemsView());
-
-  const count = h("input", { type: "number", value: 20, min: 5, max: 50, style: "width:80px" });
-  const title = h("input", { type: "text", placeholder: "소재 제목" });
-  const details = h("textarea", { rows: 2, placeholder: "세부 메모 (한 줄에 하나, 예: 키워드: ... / 실습: ...)" });
-  const addManual = () =>
-    run(async () => {
-      if (!title.value.trim()) throw new Error("소재 제목을 입력하세요");
-      await save([...items, { title: title.value.trim(), details: details.value.split("\n").map((d) => d.trim()).filter(Boolean) }]);
-      title.value = details.value = "";
-      toast("추가했습니다");
-    });
-
-  return h(
-    "div",
-    { class: "stack" },
-    h("h2", {}, "콘텐츠 계획"),
-    h(
-      "div",
-      { class: "row" },
-      ...state.topics.map((t) =>
-        h("button", { class: t.slug === state.planTopic ? "primary" : "ghost", onclick: () => ((state.planTopic = t.slug), render(true)) }, t.name),
-      ),
-    ),
-    h(
-      "div",
-      { class: "card row" },
-      h("span", {}, "AI로 소재"),
-      count,
-      h("span", {}, "개 추가"),
-      h("button", { class: "primary", onclick: () => run(async () => watchJob(await api("/api/plan/generate", { method: "POST", body: { topic: state.planTopic, count: Number(count.value) } }))) }, "계획 만들기"),
-      h("span", { class: "muted small" }, "키워드 조사 → 핵심/하위 글 구성 → 대기 목록 맨 아래에 추가"),
-    ),
-    heading,
-    list,
-    h("h3", {}, "직접 추가"),
-    h("div", { class: "card stack" }, title, details, h("button", { class: "ghost", onclick: addManual }, "대기 목록에 추가")),
-    h("h3", {}, `완료 ${plan.done.length}개`),
-    plan.done.length ? h("ul", { class: "muted small" }, ...plan.done.map((d) => h("li", {}, d))) : h("p", { class: "muted small" }, "아직 없습니다."),
-  );
 }
 
 // ── 글 ─────────────────────────────────────────────────────────────────────
@@ -518,7 +798,7 @@ async function renderProfile() {
 
 // ── 라우팅 ─────────────────────────────────────────────────────────────────
 
-const RENDER = { home: renderHome, research: renderResearch, plan: renderPlan, posts: renderPosts, keywords: renderKeywords, profile: renderProfile };
+const RENDER = { home: renderHome, calendar: renderCalendar, research: renderResearch, categories: renderCategories, curriculum: renderCurriculum, posts: renderPosts, keywords: renderKeywords, profile: renderProfile };
 
 function go(tab) {
   state.openPost = null;

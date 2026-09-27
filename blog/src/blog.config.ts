@@ -1,4 +1,5 @@
-// 블로그 전체 설정. 주제·사이트 정보는 여기만 바꾸면 됩니다.
+// 블로그 전체 설정.
+import categories from "../content/topics.json";
 
 export type Topic = {
   /** URL과 파일에 쓰이는 영문 키 */
@@ -9,26 +10,8 @@ export type Topic = {
   color: string;
 };
 
-export const TOPICS: Topic[] = [
-  {
-    slug: "ai",
-    name: "AI 활용 공부",
-    description: "매일 하나씩 AI 도구와 자동화를 직접 써보고 기록합니다.",
-    color: "#6d5dfc",
-  },
-  {
-    slug: "money",
-    name: "경제·재테크 공부",
-    description: "경제 개념과 재테크 제도를 공부하고 내 상황에 적용해 봅니다.",
-    color: "#0f9d74",
-  },
-  {
-    slug: "english",
-    name: "영어 공부",
-    description: "실제로 써먹을 표현을 매일 하나씩 익히고 예문을 만듭니다.",
-    color: "#e0703a",
-  },
-];
+// 카테고리와 순환 시작일은 content/topics.json 에 있습니다 (대시보드 "카테고리" 탭에서 편집).
+export const TOPICS: Topic[] = categories.topics;
 
 export const SITE = {
   name: "매일 한 걸음 공부노트",
@@ -40,7 +23,7 @@ export const SITE = {
   // 매일 게시 기준 시간대
   timeZone: "Asia/Seoul",
   // 주제 로테이션 기준일: 이 날짜의 주제가 TOPICS[0]
-  rotationStart: "2026-01-01",
+  rotationStart: categories.startDate,
 };
 
 export const ADSENSE = {

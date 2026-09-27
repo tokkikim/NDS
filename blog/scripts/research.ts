@@ -85,8 +85,8 @@ function comparisonMarkdown(outcomes: Outcome[]): string {
     "## 다음 단계",
     "",
     "1. 주제별 리포트의 근거와 추천 세부 방향을 읽고 운영할 주제를 고릅니다.",
-    "2. `src/blog.config.ts`의 TOPICS에 등록합니다.",
-    "3. `npm run plan -- --topic <slug>`로 콘텐츠 계획을 만듭니다.",
+    "2. 대시보드 시장분석 탭에서 \"카테고리로 등록\"을 누릅니다.",
+    "3. 커리큘럼 탭에서 커리큘럼을 만듭니다 (`npm run curriculum -- --topic <slug>`).",
     "",
   ].join("\n");
 }
