@@ -1044,7 +1044,7 @@ async function renderPosts() {
       h(
         "table",
         {},
-        h("tr", {}, h("th", {}, "날짜"), h("th", {}, "주제"), h("th", {}, "제목"), h("th", {}, "상태"), h("th", {}, "확인할 것")),
+        h("tr", {}, h("th", {}, "날짜"), h("th", {}, "주제"), h("th", {}, "제목"), h("th", {}, "상태"), h("th", {}, "확인할 것"), h("th", {}, "")),
         ...posts.map((p) =>
           h(
             "tr",
@@ -1054,11 +1054,32 @@ async function renderPosts() {
             h("td", {}, p.title),
             h("td", {}, h("span", { class: `badge b-${p.status}` }, p.status)),
             h("td", { class: "small muted" }, p.status === "초안" ? (p.publishErrors.length ? `게시 전 할 일 ${p.publishErrors.length}개` : "게시 준비됨") : p.errors.length ? `문제 ${p.errors.length}개` : "—"),
+            h("td", {}, h("button", { class: "icon danger-text", title: "글 삭제", onclick: async (e) => (e.stopPropagation(), (await deletePost(p)) && render(true)) }, "🗑")),
           ),
         ),
       ),
     ),
   );
+}
+
+/** 글 삭제 (확인 후). 게시된 글은 404가 되므로 한 번 더 경고합니다. 지웠으면 true */
+async function deletePost(p) {
+  const live = p.status !== "초안";
+  const msg = live
+    ? `"${p.title}"\n\n${p.status === "게시" ? "이미 블로그에 게시된 글입니다. 지우면 이 주소가 404가 되어 검색·링크로 들어온 방문자가 빈 페이지를 보게 됩니다." : `${p.status === "예약" ? "예약된" : "게시로 설정된"} 글입니다.`}\n보통은 "게시 취소"(초안으로 되돌리기)가 더 안전합니다.\n\n그래도 완전히 지울까요?`
+    : `"${p.title}" 초안을 지울까요?\n\n이 글에 올린 이미지도 함께 지워집니다.${p.lesson ? "\n연결된 커리큘럼 레슨은 다음 차례에 다시 배정됩니다." : ""}`;
+  if (!confirm(msg)) return false;
+  if (live && prompt('정말 지우려면 "삭제"라고 입력하세요') !== "삭제") return toast("삭제를 취소했습니다"), false;
+  return !!(await run(async () => {
+    const r = await api(`/api/posts/${encodeURIComponent(p.slug)}`, { method: "DELETE" });
+    toast(`삭제했습니다: ${r.title}${r.images ? ` (이미지 ${r.images}개 포함)` : ""}`);
+    return true;
+  }));
+}
+
+async function unpublishPost(p) {
+  if (!confirm(`"${p.title}"을(를) 초안으로 되돌릴까요?\n다음 배포부터 블로그에서 보이지 않습니다. 내용은 그대로 남습니다.`)) return false;
+  return !!(await run(async () => (await api(`/api/posts/${encodeURIComponent(p.slug)}/unpublish`, { method: "POST" }), toast("초안으로 되돌렸습니다"), true)));
 }
 
 function openPost(slug) {
@@ -1139,6 +1160,10 @@ async function renderEditor(slug) {
         { class: "row" },
         h("button", { class: "ghost", onclick: () => file.click() }, "이미지 넣기"),
         h("button", { class: "ghost", onclick: save }, "저장 (Ctrl+S)"),
+        post.status !== "초안"
+          ? h("button", { class: "ghost", title: "지우지 않고 초안으로 되돌립니다", onclick: async () => leaveEditorOk() && (await unpublishPost(post)) && render(true) }, "게시 취소")
+          : null,
+        h("button", { class: "ghost danger-text", onclick: async () => leaveEditorOk() && (await deletePost(post)) && go("posts") }, "삭제"),
         post.status === "초안" ? h("button", { class: "primary", onclick: publish }, "게시 준비") : null,
       ),
     ),

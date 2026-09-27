@@ -790,6 +790,13 @@ button.link.small {
   line-height: 1.65;
 }
 
+.danger-text {
+  color: var(--no) !important;
+}
+button.danger-text:hover {
+  border-color: var(--no);
+}
+
 /* ── 커리큘럼 단계 (접기·펼치기) ── */
 details.stage {
   margin-top: 14px;

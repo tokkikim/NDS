@@ -160,11 +160,20 @@ function postStatus(file: string) {
     topic: post.topic,
     status,
     errors,
+    lesson: post.lesson ?? null,
     // 초안을 지금 게시한다면 걸리는 문제 (TODO·직접 해보기·분량 등)
     publishErrors: post.draft ? validatePost({ ...post, draft: false }) : errors,
     todo: post.content.includes("<!-- TODO"),
     chars: post.content.replace(/\s+/g, "").length,
   };
+}
+
+/** 본문에서 /posts/<slug> 로 링크하는 다른 글 */
+function postsLinkingTo(slug: string) {
+  return getAllPostFiles()
+    .filter((f) => f !== `${slug}.md`)
+    .map(parsePostFile)
+    .filter((p) => p.content.includes(`](/posts/${slug})`) || p.content.includes(`](/posts/${slug}#`));
 }
 
 function allPosts() {
@@ -601,6 +610,39 @@ const routes: [string, RegExp, Handler][] = [
         return { ok: false, errors: result.errors };
       }
       return { ok: true, ...result };
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/posts\/([^/]+)\/unpublish$/,
+    (_req, _url, [slug]) => {
+      // 게시 취소: 지우지 않고 초안으로 되돌립니다 (다음 배포부터 블로그에서 빠짐).
+      const file = path.join(POSTS_DIR, `${safeSlug(slug)}.md`);
+      if (!fs.existsSync(file)) throw new HttpError(404, "글이 없습니다");
+      const linkedBy = postsLinkingTo(slug).filter((p) => !p.draft);
+      if (linkedBy.length) throw new HttpError(409, `게시된 다른 글이 이 글을 링크하고 있어 먼저 그 링크를 지워야 합니다: ${linkedBy.map((p) => p.title).join(", ")}`);
+      const parsed = matter(fs.readFileSync(file, "utf8"));
+      fs.writeFileSync(file, matter.stringify(parsed.content, { ...parsed.data, draft: true }));
+      return { ok: true, ...postStatus(`${slug}.md`) };
+    },
+  ],
+  [
+    "DELETE",
+    /^\/api\/posts\/([^/]+)$/,
+    (_req, _url, [slug]) => {
+      const file = path.join(POSTS_DIR, `${safeSlug(slug)}.md`);
+      if (!fs.existsSync(file)) throw new HttpError(404, "글이 없습니다");
+      if (jobs.some((j) => j.kind === "draft" && j.status === "running")) throw new HttpError(409, "초안을 만드는 작업이 실행 중입니다. 끝난 뒤 지우세요");
+      // 다른 글이 링크하고 있으면 그 글이 깨지므로 막습니다.
+      const linkedBy = postsLinkingTo(slug);
+      if (linkedBy.length) throw new HttpError(409, `다른 글이 이 글을 링크하고 있어 지울 수 없습니다: ${linkedBy.map((p) => p.title).join(", ")}`);
+      const post = parsePostFile(`${slug}.md`);
+      fs.rmSync(file);
+      // 이 글에 올린 이미지도 함께 지웁니다.
+      const imageDir = path.join(PUBLIC_DIR, "images", "posts", slug);
+      const images = fs.existsSync(imageDir) ? fs.readdirSync(imageDir).length : 0;
+      fs.rmSync(imageDir, { recursive: true, force: true });
+      return { ok: true, title: post.title, lesson: post.lesson ?? null, images };
     },
   ],
   [
