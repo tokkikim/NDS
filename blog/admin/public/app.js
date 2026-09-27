@@ -113,7 +113,7 @@ async function showJob(id) {
 
 // ── 일정 공통 ──────────────────────────────────────────────────────────────
 
-const STATUS_CLASS = { 게시: "b-go", 완료: "b-go", 예약: "b-go", 초안: "b-hold", "작성 중": "b-hold", 오늘: "b-today", 예정: "b-plan", 놓침: "b-no", "레슨 없음": "b-no", 미배정: "b-plan", "시작 전": "b-plan" };
+const STATUS_CLASS = { 게시: "b-go", 완료: "b-go", 예약: "b-go", 초안: "b-hold", "작성 중": "b-hold", 오늘: "b-today", 예정: "b-plan", 놓침: "b-no", 여유: "b-plan", "레슨 없음": "b-no", 미배정: "b-plan", "시작 전": "b-plan" };
 const statusBadge = (s) => h("span", { class: `badge ${STATUS_CLASS[s] ?? ""}` }, s);
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
@@ -130,7 +130,7 @@ const createDraft = (body) => run(async () => watchJob(await api("/api/draft", {
 function dayDetail(d, { compact = false } = {}) {
   const topic = d.topic;
   const l = d.lesson;
-  const canDraft = topic && !d.post && ["오늘", "예정", "놓침"].includes(d.status);
+  const canDraft = topic && !d.post && ["오늘", "예정", "놓침", "여유"].includes(d.status);
   return h(
     "div",
     { class: "stack" },
@@ -141,6 +141,7 @@ function dayDetail(d, { compact = false } = {}) {
     l && l.keywords.length && !compact ? h("div", { class: "small muted" }, `키워드: ${l.keywords.join(", ")}`) : null,
     d.status === "레슨 없음" ? h("div", { class: "small b-no" }, "커리큘럼 레슨이 모두 배정됐습니다. 커리큘럼 탭에서 레슨을 추가하세요.") : null,
     d.status === "놓침" ? h("div", { class: "small muted" }, "이 날의 레슨은 다음 차례로 자동으로 밀렸습니다.") : null,
+    d.status === "여유" ? h("div", { class: "small muted" }, "날짜가 고정된 레슨(📌)을 기다리는 여유일입니다. 자유 주제로 쓰거나 쉬어도 됩니다.") : null,
     h(
       "div",
       { class: "row" },

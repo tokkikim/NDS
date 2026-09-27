@@ -4,12 +4,13 @@
 // 그래서 하루를 놓쳐도 레슨이 사라지지 않고 다음 차례로 밀립니다.
 // - 날짜가 고정된 레슨(대회 당일·접수일 등)은 순환과 상관없이 그 날짜에 배정하고,
 //   그날 원래 차례였던 카테고리의 레슨은 다음 차례로 밀립니다.
+// - 고정 레슨보다 뒤 순서인 레슨(예: 대회 후 기록 분석)은 그 날짜 전에 당겨 쓰지 않고, 그 차례는 "여유"로 둡니다.
 import type { Topic } from "../blog.config";
 import { allLessons, type Curriculum, type Lesson } from "./curriculum";
 import { addDays, daysBetween } from "./dates";
 import type { Post } from "./posts";
 
-export type DayStatus = "게시" | "예약" | "초안" | "오늘" | "예정" | "놓침" | "레슨 없음" | "시작 전";
+export type DayStatus = "게시" | "예약" | "초안" | "오늘" | "예정" | "놓침" | "여유" | "레슨 없음" | "시작 전";
 
 export type DayPlan = {
   date: string;
@@ -81,8 +82,16 @@ export function buildSchedule({ startDate, topics, curricula, posts, today, from
     } else if (date < today) {
       plan = { date, topic: rotation, status: "놓침" };
     } else {
-      const next = queues.get(rotation.slug)?.shift();
-      plan = next
+      const queue = queues.get(rotation.slug) ?? [];
+      const peek = queue[0];
+      const order = (id: string) => (lessonsByTopic.get(rotation.slug) ?? []).findIndex((l) => l.id === id);
+      const waiting =
+        peek &&
+        [...pinned.entries()].some(([pinDate, pin]) => pin.topic.slug === rotation.slug && pinDate > date && order(pin.id) < order(peek.id));
+      const next = waiting ? undefined : queue.shift();
+      plan = waiting
+        ? { date, topic: rotation, status: "여유" }
+        : next
         ? { date, topic: rotation, status: date === today ? "오늘" : "예정", lesson: lessonInfo(rotation.slug, next.id) }
         : { date, topic: rotation, status: "레슨 없음" };
     }
