@@ -12,12 +12,18 @@ import { SITE, TOPICS } from "../src/blog.config";
 import { readCurriculum } from "../src/lib/curriculum";
 import { todayString } from "../src/lib/dates";
 import { getAllPostFiles, parsePostFile, validatePost } from "../src/lib/posts";
-import { lessonForDate } from "../src/lib/schedule";
+import { buildSchedule, lessonForDate } from "../src/lib/schedule";
 import { ensureClaudeCli, loadPrompt, runClaude } from "./claude";
 import { fail, parseArgs, postPath, resolveDateAndTopic } from "./lib";
 
 const args = parseArgs();
-const { date, topic } = resolveDateAndTopic(args);
+const resolved = resolveDateAndTopic(args);
+const date = resolved.date;
+const allPosts = getAllPostFiles().map(parsePostFile);
+const curricula = Object.fromEntries(TOPICS.map((t) => [t.slug, readCurriculum(t.slug)]));
+const scheduleInput = { startDate: SITE.rotationStart, topics: TOPICS, curricula, posts: allPosts, today: todayString() };
+// --topic이 없으면 달력의 그날 카테고리를 씁니다 (대회 당일처럼 날짜가 고정된 레슨이면 순환과 다를 수 있음).
+const topic = args.topic ? resolved.topic : (buildSchedule({ ...scheduleInput, from: date, to: date })[0]?.topic ?? resolved.topic);
 const file = postPath(date, topic);
 const relFile = path.relative(process.cwd(), file);
 const slug = path.basename(file, ".md");
@@ -25,17 +31,13 @@ if (fs.existsSync(file)) fail(`이미 파일이 있습니다: ${relFile}`);
 ensureClaudeCli();
 
 // 같은 주제의 이전 글: 중복을 피하고, 관련 글끼리 내부 링크를 걸 수 있게 넘깁니다.
-const allPosts = getAllPostFiles().map(parsePostFile);
 const previous = allPosts
   .filter((p) => p.topic === topic.slug)
   .sort((a, b) => b.date.localeCompare(a.date))
   .slice(0, 40)
   .map((p) => `- ${p.title} (/posts/${p.slug})`);
 
-const curricula = Object.fromEntries(TOPICS.map((t) => [t.slug, readCurriculum(t.slug)]));
-const lesson = args.subject
-  ? undefined
-  : lessonForDate({ startDate: SITE.rotationStart, topics: TOPICS, curricula, posts: allPosts, today: todayString() }, date, topic.slug);
+const lesson = args.subject ? undefined : lessonForDate(scheduleInput, date, topic.slug);
 const curriculum = curricula[topic.slug];
 const subject = args.subject
   ? args.subject

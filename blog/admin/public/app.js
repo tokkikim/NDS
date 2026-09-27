@@ -118,6 +118,12 @@ const statusBadge = (s) => h("span", { class: `badge ${STATUS_CLASS[s] ?? ""}` }
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 
+const dday = (date) => {
+  const n = Math.round((Date.parse(`${date}T00:00:00Z`) - Date.parse(`${new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10)}T00:00:00Z`)) / 864e5);
+  return n > 0 ? `D-${n}` : n === 0 ? "D-DAY" : `D+${-n}`;
+};
+const pinBadge = (l) => (l?.date ? h("span", { class: "badge b-today", title: "날짜가 고정된 레슨" }, "📌 날짜 고정") : null);
+
 const createDraft = (body) => run(async () => watchJob(await api("/api/draft", { method: "POST", body })));
 
 /** 하루치 할 일 카드 (홈·달력에서 공통 사용) */
@@ -129,7 +135,7 @@ function dayDetail(d, { compact = false } = {}) {
     "div",
     { class: "stack" },
     h("div", { class: "row" }, topic ? h("span", { class: "badge", style: `color:${topic.color}` }, topic.name) : null, statusBadge(d.status), h("span", { class: "muted small" }, `${d.date} (${weekday(d.date)})`)),
-    l ? h("div", { class: "muted small" }, `${l.stage} · 레슨 ${l.number}/${l.total}`) : null,
+    l ? h("div", { class: "row" }, h("span", { class: "muted small" }, `${l.stage} · 레슨 ${l.number}/${l.total}`), pinBadge(l)) : null,
     d.post ? h("strong", {}, d.post.title) : l ? h("strong", {}, l.title) : null,
     l ? h("div", { class: "task" }, h("div", { class: "small muted" }, "할 일"), l.task) : null,
     l && l.keywords.length && !compact ? h("div", { class: "small muted" }, `키워드: ${l.keywords.join(", ")}`) : null,
@@ -210,6 +216,7 @@ async function renderHome() {
                 h("div", { class: c.daysLeft !== null && c.daysLeft < 21 ? "small b-no" : "muted small" }, `레슨 ${c.done}/${c.lessons}${c.daysLeft !== null ? ` · ${c.daysLeft}일 뒤 레슨 소진` : ""}`),
               )
             : h("div", { class: "small b-no" }, "커리큘럼이 없습니다 — 만들어 주세요"),
+          c.event ? h("div", { class: "small", style: "margin-top:6px" }, `🏁 ${c.event.name} ${dday(c.event.date)}`) : null,
         ),
       ),
     ),
@@ -265,11 +272,11 @@ async function renderCalendar() {
           },
           h("div", { class: "row", style: "justify-content:space-between" }, h("strong", {}, Number(d.date.slice(8))), d.topic ? statusBadge(d.status) : null),
           d.topic ? h("div", { class: "small", style: `color:${d.topic.color};font-weight:700` }, d.topic.name) : null,
-          h("div", { class: "small clamp" }, d.post?.title ?? d.lesson?.title ?? ""),
+          h("div", { class: "small clamp" }, `${d.lesson?.date && !d.post ? "📌 " : ""}${d.post?.title ?? d.lesson?.title ?? ""}`),
         ),
       ),
     ),
-    h("p", { class: "muted small" }, "날짜를 누르면 그날의 할 일을 보고 초안을 만들 수 있습니다. 지난 날 글을 쓰지 못하면 그 레슨은 같은 카테고리의 다음 차례로 자동으로 밀립니다."),
+    h("p", { class: "muted small" }, "📌는 대회 당일·접수일처럼 날짜가 고정된 레슨입니다. 날짜를 누르면 그날의 할 일을 보고 초안을 만들 수 있습니다. 지난 날 글을 쓰지 못하면 그 레슨은 같은 카테고리의 다음 차례로 자동으로 밀립니다."),
   );
 }
 
@@ -390,6 +397,7 @@ async function renderCurriculum() {
     const title = h("input", { type: "text", value: l.title, style: "width:100%" });
     const task = h("textarea", { rows: 4, value: l.task });
     const keywords = h("input", { type: "text", value: l.keywords.join(", "), style: "width:100%" });
+    const fixed = h("input", { type: "date", value: l.date ?? "" });
     modal(
       i < stage.lessons.length ? "레슨 수정" : "레슨 추가",
       h(
@@ -401,12 +409,14 @@ async function renderCurriculum() {
         task,
         h("label", { class: "small muted" }, "키워드 (쉼표로 구분)"),
         keywords,
+        h("label", { class: "small muted" }, "날짜 고정 (대회 당일·접수일처럼 꼭 그날 써야 하는 레슨만. 비우면 순서대로 배정)"),
+        fixed,
         h(
           "button",
           {
             class: "primary",
             onclick: () => {
-              stage.lessons[i] = { id: l.id, title: title.value, task: task.value, keywords: keywords.value.split(",").map((k) => k.trim()).filter(Boolean) };
+              stage.lessons[i] = { id: l.id, title: title.value, task: task.value, keywords: keywords.value.split(",").map((k) => k.trim()).filter(Boolean), ...(fixed.value ? { date: fixed.value } : {}) };
               document.getElementById("modal").close();
               save(c);
             },
@@ -430,6 +440,47 @@ async function renderCurriculum() {
         h("label", { class: "small muted" }, "단계 목표"),
         goal,
         h("button", { class: "primary", onclick: () => ((c.stages[si] = { ...s, title: title.value, goal: goal.value }), document.getElementById("modal").close(), save(c)) }, "저장"),
+      ),
+    );
+  };
+  const editEvent = () => {
+    const e = c.event ?? { name: "", date: "", registrationDate: "", url: "" };
+    const name = h("input", { type: "text", value: e.name, placeholder: "예: 2027 대구마라톤", style: "width:100%" });
+    const date = h("input", { type: "date", value: e.date });
+    const reg = h("input", { type: "date", value: e.registrationDate ?? "" });
+    const url = h("input", { type: "text", value: e.url ?? "", placeholder: "공식 페이지 주소", style: "width:100%" });
+    modal(
+      "목표 대회·날짜",
+      h(
+        "div",
+        { class: "stack", style: "padding-top:12px" },
+        h("div", { class: "muted small" }, "대회·시험처럼 날짜가 정해진 목표입니다. 바꾼 뒤 \"다시 설계\"를 누르면 이 날짜에 맞춰 레슨 수와 훈련 주기를 다시 계산하고, 접수일·대회 당일 레슨을 그 날짜에 고정합니다."),
+        h("label", { class: "small muted" }, "대회 이름"),
+        name,
+        h("label", { class: "small muted" }, "대회 날짜"),
+        date,
+        h("label", { class: "small muted" }, "접수 시작일 (선택)"),
+        reg,
+        h("label", { class: "small muted" }, "공식 페이지 (선택)"),
+        url,
+        h(
+          "div",
+          { class: "row" },
+          h(
+            "button",
+            {
+              class: "primary",
+              onclick: () => {
+                if (!name.value.trim() || !date.value) return toast("대회 이름과 날짜를 입력하세요");
+                c.event = { name: name.value.trim(), date: date.value, ...(reg.value ? { registrationDate: reg.value } : {}), ...(url.value.trim() ? { url: url.value.trim() } : {}) };
+                document.getElementById("modal").close();
+                save(c);
+              },
+            },
+            "저장",
+          ),
+          c.event ? h("button", { class: "ghost", onclick: () => (delete c.event, document.getElementById("modal").close(), save(c)) }, "목표 대회 없애기") : null,
+        ),
       ),
     );
   };
@@ -461,6 +512,22 @@ async function renderCurriculum() {
       { class: "card stack", style: `border-left:4px solid ${topic.color}` },
       h("div", { class: "row", style: "justify-content:space-between" }, h("strong", {}, c.goal || "(목표 없음)"), h("button", { class: "icon", onclick: editGoal }, "✎ 목표 수정")),
       h("div", { class: "muted small" }, `출발 수준: ${c.level || "-"}`),
+      h(
+        "div",
+        { class: "row" },
+        c.event
+          ? h(
+              "span",
+              {},
+              h("strong", {}, `🏁 ${c.event.name}`),
+              ` · ${c.event.date} (${weekday(c.event.date)}) `,
+              h("span", { class: "badge b-today" }, dday(c.event.date)),
+              c.event.registrationDate ? ` · 접수 ${c.event.registrationDate} ${dday(c.event.registrationDate)}` : "",
+              c.event.url ? [" · ", h("a", { href: c.event.url, target: "_blank", rel: "noopener" }, "공식 페이지")] : "",
+            )
+          : h("span", { class: "muted small" }, "목표 대회·날짜 없음"),
+        h("button", { class: "icon", onclick: editEvent }, c.event ? "✎ 대회 수정" : "+ 목표 대회 설정"),
+      ),
       h("div", { class: "progress" }, h("span", { style: `width:${lessons.length ? (done / lessons.length) * 100 : 0}%;background:${topic.color}` })),
       h("div", { class: "small" }, `레슨 ${lessons.length}개 · 완료 ${done} · 작성 중 ${writing}${lastDate ? ` · 예상 종료 ${lastDate}` : ""}`),
       h(
@@ -499,7 +566,7 @@ async function renderCurriculum() {
             h(
               "div",
               { class: "body" },
-              h("div", { class: "row" }, h("strong", {}, l.title), statusBadge(info.status), info.date ? h("span", { class: "muted small" }, `${info.date} (${weekday(info.date)})`) : null),
+              h("div", { class: "row" }, h("strong", {}, l.title), statusBadge(info.status), pinBadge(l), info.date ? h("span", { class: "muted small" }, `${info.date} (${weekday(info.date)})`) : null),
               h("div", { class: "small" }, `할 일: ${l.task}`),
               l.keywords.length ? h("div", { class: "muted small" }, l.keywords.join(" · ")) : null,
             ),

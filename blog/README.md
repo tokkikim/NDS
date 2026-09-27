@@ -96,6 +96,13 @@ npm run curriculum -- --topic marathon --lessons 45
 npm run curriculum -- --topic marathon --append 15   # 기존 뒤에 레슨 15개 이어서 추가
 ```
 
+**목표 대회·날짜**: 대회나 시험처럼 날짜가 정해진 목표가 있으면 커리큘럼에 넣으세요 (대시보드 커리큘럼 탭 "목표 대회 설정" 또는 아래 명령).
+레슨 수를 대회 날짜에서 거꾸로 계산하고, 접수일·대회 당일 레슨은 순환과 상관없이 그 날짜에 고정(📌)합니다.
+
+```bash
+npm run curriculum -- --topic marathon --event "2027 대구마라톤" --event-date 2027-02-28 --registration 2026-10-12
+```
+
 다시 설계해도 이미 글로 쓴 레슨은 그대로 보존되고, 지울 수도 없습니다. 프로필을 채운 뒤 다시 설계하면 내 수준에 맞게 바뀝니다.
 
 ## 네이버 API 키 (무료)

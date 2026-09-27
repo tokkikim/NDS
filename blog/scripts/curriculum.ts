@@ -2,12 +2,15 @@
 //   npm run curriculum -- --topic marathon               # 새로 만들기 (레슨 30개)
 //   npm run curriculum -- --topic marathon --lessons 45
 //   npm run curriculum -- --topic marathon --append 15   # 기존 뒤에 레슨 15개 이어서 추가
+//   npm run curriculum -- --topic marathon --event "2027 대구마라톤" --event-date 2027-02-28 --registration 2026-10-12
+//     → 목표 대회에 맞춰 레슨 수를 계산하고, 접수일·대회 당일 레슨을 그 날짜에 고정합니다.
 // 이미 글로 쓴 레슨은 다시 만들 때도 그대로 보존됩니다.
 import fs from "node:fs";
 import path from "node:path";
-import { getTopic, TOPICS } from "../src/blog.config";
+import { getTopic, SITE, TOPICS } from "../src/blog.config";
 import { allLessons, curriculumPath, readCurriculum, writeCurriculum, type Curriculum } from "../src/lib/curriculum";
-import { todayString } from "../src/lib/dates";
+import { addDays, todayString } from "../src/lib/dates";
+import { topicForDateIn } from "../src/lib/schedule";
 import { getAllPostFiles, parsePostFile } from "../src/lib/posts";
 import { ensureClaudeCli, loadPrompt, NAVER_TOOL, runClaude } from "./claude";
 import { fail, parseArgs } from "./lib";
@@ -21,8 +24,23 @@ const file = curriculumPath(topic.slug);
 const relFile = path.relative(process.cwd(), file);
 const existing = readCurriculum(topic.slug);
 const append = args.append !== undefined;
-const count = Number(append ? args.append : (args.lessons ?? 30)) || 30;
+let count = Number(append ? args.append : (args.lessons ?? 30)) || 30;
 const existingCount = existing ? allLessons(existing).length : 0;
+
+// 목표 대회: 인자로 주면 새로 설정, 없으면 기존 커리큘럼의 것을 씁니다.
+const event = args["event-date"]
+  ? {
+      name: args.event ?? "목표 대회",
+      date: args["event-date"],
+      ...(args.registration ? { registrationDate: args.registration } : {}),
+      ...(args["event-url"] ? { url: args["event-url"] } : {}),
+    }
+  : existing?.event;
+// 대회가 있으면: 오늘(또는 시작일)부터 대회 전날까지 이 카테고리 차례 수 + 대회 당일 + 대회 후 회복·분석 4개
+const from = todayString() > SITE.rotationStart ? todayString() : SITE.rotationStart;
+let turnsBeforeEvent = 0;
+if (event) for (let d = from; d < event.date; d = addDays(d, 1)) if (topicForDateIn(SITE.rotationStart, TOPICS, d)?.slug === topic.slug) turnsBeforeEvent++;
+if (event && !append && args.lessons === undefined) count = turnsBeforeEvent + 1 + 4;
 
 // 글로 이미 쓴 레슨 id (초안 포함) — 다시 만들 때 반드시 남아 있어야 합니다.
 const usedIds = getAllPostFiles()
@@ -60,6 +78,19 @@ const prompt = loadPrompt("curriculum", {
     ? `기존 레슨 ${existingCount}개(약 ${existingCount * TOPICS.length}일) 뒤에 이어서 ${count}개 × ${TOPICS.length}일 = 약 ${count * TOPICS.length}일(${Math.round((count * TOPICS.length) / 7)}주)을 추가합니다. 새 레슨은 시작 후 ${existingCount * TOPICS.length}일째부터입니다.`
     : `레슨 ${count}개 × ${TOPICS.length}일 = 전체 약 ${count * TOPICS.length}일(약 ${Math.round((count * TOPICS.length) / 7)}주, ${Math.round((count * TOPICS.length) / 30)}개월)입니다.`,
   keepRule,
+  event: event
+    ? [
+        `- 목표 대회: ${event.name} — ${event.date}${event.url ? ` (${event.url})` : ""}`,
+        event.registrationDate ? `- 접수 시작: ${event.registrationDate}` : "",
+        `- 대회 전까지 이 카테고리 차례는 약 ${turnsBeforeEvent}번 (${from} 기준)입니다.`,
+        "- 대회 당일 레슨에는 \"date\": \"" + event.date + "\" 를 넣어 그 날짜에 고정하세요.",
+        event.registrationDate ? "- 접수 시작일 레슨(대회 고르기·접수 방법·접수 후기)에는 \"date\": \"" + event.registrationDate + "\" 를 넣어 고정하세요." : "",
+        "- 대회 전 레슨은 대회 날짜에서 거꾸로 계산해 훈련 주기(기초 → 강화 → 테이퍼링)를 맞추고, 대회 후에는 회복·기록 분석·다음 목표 레슨 4개를 두세요.",
+        "- 커리큘럼 JSON 최상위에 \"event\" 필드를 위 정보 그대로 넣으세요.",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "(없음 — 날짜가 정해진 목표가 있다면 그 날짜를 향하도록 설계하는 것이 좋습니다)",
 });
 
 const backup = existing ? fs.readFileSync(file, "utf8") : null;
@@ -86,7 +117,8 @@ runClaude(prompt, {
   }
   let saved: Curriculum;
   try {
-    saved = writeCurriculum(topic.slug, { ...data, topic: topic.slug });
+    // 목표 대회 정보는 AI가 빠뜨려도 유지합니다.
+    saved = writeCurriculum(topic.slug, { ...data, topic: topic.slug, ...(event ? { event: { ...event, ...(data.event ?? {}), date: event.date } } : {}) });
   } catch (err) {
     return restore(`형식 오류: ${(err as Error).message}`);
   }

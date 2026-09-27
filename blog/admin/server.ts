@@ -184,7 +184,7 @@ function status() {
         const c = readCurriculum(t.slug);
         const used = new Set(getAllPostFiles().map(parsePostFile).filter((p) => p.topic === t.slug && p.lesson).map((p) => p.lesson));
         const lessons = c ? allLessons(c) : [];
-        return { ...t, lessons: lessons.length, done: lessons.filter((l) => used.has(l.id)).length, daysLeft: empty[t.slug] ?? null, hasCurriculum: !!c };
+        return { ...t, lessons: lessons.length, done: lessons.filter((l) => used.has(l.id)).length, daysLeft: empty[t.slug] ?? null, hasCurriculum: !!c, event: c?.event ?? null };
       });
     })(),
     tools: {

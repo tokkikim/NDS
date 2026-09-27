@@ -14,6 +14,17 @@ export type Lesson = {
   task: string;
   /** 제목·본문에 넣을 검색 키워드 (검색량 메모 포함 가능) */
   keywords: string[];
+  /** 이 날짜에 고정 (대회 당일·접수일처럼 날짜가 정해진 레슨). 없으면 순서대로 배정 */
+  date?: string;
+};
+
+/** 커리큘럼이 향하는 날짜가 정해진 목표 (대회, 시험 등) */
+export type TargetEvent = {
+  name: string;
+  date: string;
+  /** 접수 시작일 (알면) */
+  registrationDate?: string;
+  url?: string;
 };
 
 export type Stage = { title: string; goal: string; lessons: Lesson[] };
@@ -24,6 +35,7 @@ export type Curriculum = {
   goal: string;
   /** 출발 수준 (예: 달리기 경험 없음) */
   level: string;
+  event?: TargetEvent;
   stages: Stage[];
 };
 
@@ -58,12 +70,16 @@ export function validateCurriculum(c: unknown): string[] {
   if (!o || typeof o !== "object") return ["커리큘럼이 객체가 아닙니다"];
   const errors: string[] = [];
   if (!Array.isArray(o.stages)) return ["stages가 배열이 아닙니다"];
+  const isDate = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  if (o.event && (!o.event.name?.trim() || !isDate(o.event.date))) errors.push("목표 대회는 이름과 날짜(YYYY-MM-DD)가 필요합니다");
+  if (o.event?.registrationDate && !isDate(o.event.registrationDate)) errors.push("접수일 형식이 잘못됐습니다");
   o.stages.forEach((s, i) => {
     if (!s?.title?.trim()) errors.push(`${i + 1}단계 제목이 비어 있습니다`);
     if (!Array.isArray(s?.lessons)) return errors.push(`${i + 1}단계 lessons가 배열이 아닙니다`);
     s.lessons.forEach((l, j) => {
       if (!l?.title?.trim()) errors.push(`${i + 1}단계 ${j + 1}번 레슨 제목이 비어 있습니다`);
       if (!l?.task?.trim()) errors.push(`${i + 1}단계 ${j + 1}번 레슨의 할 일이 비어 있습니다`);
+      if (l?.date && !isDate(l.date)) errors.push(`${i + 1}단계 ${j + 1}번 레슨의 고정 날짜 형식이 잘못됐습니다`);
     });
   });
   return errors;
@@ -79,6 +95,7 @@ function normalizeIds(slug: string, c: Curriculum): Curriculum {
     topic: c.topic ?? slug,
     goal: c.goal ?? "",
     level: c.level ?? "",
+    ...(c.event ? { event: { name: c.event.name.trim(), date: c.event.date, ...(c.event.registrationDate ? { registrationDate: c.event.registrationDate } : {}), ...(c.event.url ? { url: c.event.url.trim() } : {}) } } : {}),
     stages: c.stages.map((s) => ({
       title: s.title.trim(),
       goal: (s.goal ?? "").trim(),
@@ -91,6 +108,7 @@ function normalizeIds(slug: string, c: Curriculum): Curriculum {
           title: l.title.trim(),
           task: l.task.trim(),
           keywords: Array.isArray(l.keywords) ? l.keywords.map(String).filter(Boolean) : [],
+          ...(l.date ? { date: l.date } : {}),
         };
       }),
     })),

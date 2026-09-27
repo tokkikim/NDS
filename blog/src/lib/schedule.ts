@@ -2,6 +2,8 @@
 // - 지난 날: 실제로 쓴 글 기준 (글이 없으면 "놓침")
 // - 오늘·앞으로: 아직 안 쓴 레슨을 카테고리 차례가 오는 날에 순서대로 배정
 // 그래서 하루를 놓쳐도 레슨이 사라지지 않고 다음 차례로 밀립니다.
+// - 날짜가 고정된 레슨(대회 당일·접수일 등)은 순환과 상관없이 그 날짜에 배정하고,
+//   그날 원래 차례였던 카테고리의 레슨은 다음 차례로 밀립니다.
 import type { Topic } from "../blog.config";
 import { allLessons, type Curriculum, type Lesson } from "./curriculum";
 import { addDays, daysBetween } from "./dates";
@@ -45,8 +47,19 @@ export function buildSchedule({ startDate, topics, curricula, posts, today, from
 
   // 이미 글로 쓴(초안 포함) 레슨은 다시 배정하지 않습니다.
   const used = new Set(posts.filter((p) => p.lesson).map((p) => `${p.topic}:${p.lesson}`));
+  // 오늘 이후로 날짜가 고정된 레슨. (고정 날짜가 지났는데 못 쓴 레슨은 일반 레슨처럼 다음 차례에 배정)
+  const pinned = new Map<string, { topic: Topic; id: string }>();
+  for (const t of topics) {
+    for (const l of lessonsByTopic.get(t.slug) ?? []) {
+      if (l.date && l.date >= today && !used.has(`${t.slug}:${l.id}`) && !pinned.has(l.date)) pinned.set(l.date, { topic: t, id: l.id });
+    }
+  }
+  const pinnedIds = new Set([...pinned.values()].map((p) => `${p.topic.slug}:${p.id}`));
   const queues = new Map(
-    topics.map((t) => [t.slug, (lessonsByTopic.get(t.slug) ?? []).filter((l) => !used.has(`${t.slug}:${l.id}`))]),
+    topics.map((t) => [
+      t.slug,
+      (lessonsByTopic.get(t.slug) ?? []).filter((l) => !used.has(`${t.slug}:${l.id}`) && !pinnedIds.has(`${t.slug}:${l.id}`)),
+    ]),
   );
 
   const days: DayPlan[] = [];
@@ -62,6 +75,9 @@ export function buildSchedule({ startDate, topics, curricula, posts, today, from
       plan = { date, topic, status, post: { slug: post.slug, title: post.title }, lesson: post.lesson ? lessonInfo(post.topic, post.lesson) : undefined };
     } else if (!rotation) {
       plan = { date, topic: null, status: "시작 전" };
+    } else if (pinned.has(date) && date >= today) {
+      const pin = pinned.get(date)!;
+      plan = { date, topic: pin.topic, status: date === today ? "오늘" : "예정", lesson: lessonInfo(pin.topic.slug, pin.id) };
     } else if (date < today) {
       plan = { date, topic: rotation, status: "놓침" };
     } else {
