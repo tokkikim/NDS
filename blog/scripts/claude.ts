@@ -18,6 +18,14 @@ export function ensureClaudeCli(): void {
   }
 }
 
+/**
+ * 파일 하나만 고칠 수 있게 하는 권한 규칙. Claude CLI 규칙은 슬래시(/) 경로만 인식하므로
+ * Windows의 역슬래시 경로(content\\curriculum\\money.json)를 바꿔 줍니다.
+ */
+export function editRule(file: string): string {
+  return `Edit(./${path.relative(process.cwd(), file).split(path.sep).join("/")})`;
+}
+
 /** 네이버 데이터 도구를 Claude가 부를 수 있게 하는 권한 규칙 */
 export const NAVER_TOOL = "Bash(npm run -s naver -- *)";
 

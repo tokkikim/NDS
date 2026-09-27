@@ -15,7 +15,7 @@ import { getAllPostFiles, parsePostFile, validatePost } from "../src/lib/posts";
 import { buildSchedule, lessonForDate } from "../src/lib/schedule";
 import { blockNotes, readDailyLog } from "../src/lib/daily";
 import { addDays } from "../src/lib/dates";
-import { ensureClaudeCli, loadPrompt, runClaude } from "./claude";
+import { editRule, ensureClaudeCli, loadPrompt, runClaude } from "./claude";
 import { fail, parseArgs, postPath, resolveDateAndTopic } from "./lib";
 
 const args = parseArgs();
@@ -27,7 +27,7 @@ const scheduleInput = { startDate: SITE.rotationStart, topics: TOPICS, curricula
 // --topic이 없으면 달력의 그날 카테고리를 씁니다 (대회 당일처럼 날짜가 고정된 레슨이면 순환과 다를 수 있음).
 const topic = args.topic ? resolved.topic : (buildSchedule({ ...scheduleInput, from: date, to: date })[0]?.topic ?? resolved.topic);
 const file = postPath(date, topic);
-const relFile = path.relative(process.cwd(), file);
+const relFile = path.relative(process.cwd(), file).split(path.sep).join("/");
 const slug = path.basename(file, ".md");
 if (fs.existsSync(file)) fail(`이미 파일이 있습니다: ${relFile}`);
 ensureClaudeCli();
@@ -75,7 +75,7 @@ const prompt = loadPrompt("draft", {
 console.log(`… ${topic.name} 초안 작성 중${lesson ? ` [레슨 ${lesson.number}/${lesson.total}: ${lesson.title}]` : ""} (조사 때문에 몇 분 걸릴 수 있어요)`);
 // 조사용 도구와, 오늘 글 파일 하나에 대한 쓰기 권한만 허용합니다. (Edit 규칙이 Write까지 포함)
 runClaude(prompt, {
-  allowedTools: ["WebSearch", "WebFetch", "Read", "Glob", "Grep", `Edit(./${relFile})`, "Bash(npm run check)"],
+  allowedTools: ["WebSearch", "WebFetch", "Read", "Glob", "Grep", editRule(file), "Bash(npm run check)"],
   model: args.model,
   inheritOutput: true,
 }).then(({ code }) => {

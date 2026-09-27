@@ -13,7 +13,7 @@ import { allLessons, curriculumPath, readCurriculum, writeCurriculum, type Curri
 import { addDays, todayString } from "../src/lib/dates";
 import { topicForDateIn } from "../src/lib/schedule";
 import { getAllPostFiles, parsePostFile } from "../src/lib/posts";
-import { ensureClaudeCli, loadPrompt, NAVER_TOOL, runClaude } from "./claude";
+import { editRule, ensureClaudeCli, loadPrompt, NAVER_TOOL, runClaude } from "./claude";
 import { fail, parseArgs } from "./lib";
 
 const args = parseArgs();
@@ -23,7 +23,7 @@ if (!topic) fail(`--topic을 지정하세요 (가능: ${TOPICS.map((t) => t.slug
 ensureClaudeCli();
 
 const file = curriculumPath(topic.slug);
-const relFile = path.relative(process.cwd(), file);
+const relFile = path.relative(process.cwd(), file).split(path.sep).join("/");
 const existing = readCurriculum(topic.slug);
 const append = args.append !== undefined;
 let count = Number(append ? args.append : (args.lessons ?? 30)) || 30;
@@ -115,12 +115,14 @@ const restore = (reason: string): never => {
 
 console.log(`… ${topic.name} 커리큘럼 ${fillDaily ? "매일 할 일 채우기" : append ? `레슨 ${count}개 추가` : "설계"} 중 (몇 분 걸릴 수 있어요)`);
 runClaude(prompt, {
-  allowedTools: fillDaily ? ["Read", `Edit(./${relFile})`] : ["WebSearch", "WebFetch", "Read", "Glob", "Grep", NAVER_TOOL, `Edit(./${relFile})`],
+  allowedTools: fillDaily ? ["Read", editRule(file)] : ["WebSearch", "WebFetch", "Read", "Glob", "Grep", NAVER_TOOL, editRule(file)],
   model: args.model,
   inheritOutput: true,
 }).then(({ code }) => {
   if (code !== 0) restore(`claude 실행이 실패했습니다 (종료 코드 ${code})`);
   if (!fs.existsSync(file)) restore("커리큘럼 파일이 만들어지지 않았습니다");
+  // 파일 쓰기가 막히면 Claude는 결과를 답변으로만 보여주고 끝납니다. 기존 파일을 성공으로 착각하지 않게 막습니다.
+  if (backup !== null && fs.readFileSync(file, "utf8") === backup) restore("Claude가 커리큘럼 파일을 고치지 못했습니다 (파일 쓰기 권한 거부 등, 위 로그의 ⚠ 실패 확인)");
 
   let data: Curriculum;
   try {
