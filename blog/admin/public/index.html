@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>공부노트 관리</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <strong class="brand">공부노트 관리</strong>
+      <nav id="tabs">
+        <button data-tab="home">홈</button>
+        <button data-tab="research">시장분석</button>
+        <button data-tab="plan">계획</button>
+        <button data-tab="posts">글</button>
+        <button data-tab="keywords">키워드</button>
+        <button data-tab="profile">프로필</button>
+      </nav>
+    </header>
+
+    <main id="view"></main>
+
+    <aside id="jobs" class="jobs" hidden></aside>
+
+    <dialog id="modal">
+      <div class="modal-head">
+        <strong id="modal-title"></strong>
+        <button class="ghost" onclick="document.getElementById('modal').close()">닫기</button>
+      </div>
+      <div id="modal-body"></div>
+    </dialog>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

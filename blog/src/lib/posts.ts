@@ -12,6 +12,8 @@ export const PUBLIC_DIR = path.join(process.cwd(), "public");
 export const TODO_MARKER = "<!-- TODO";
 /** 모든 글에 반드시 있어야 하는, 직접 경험을 쓰는 섹션 */
 export const EXPERIENCE_HEADING = "## 직접 해보기";
+/** 대시보드에서 이미지를 올릴 때 넣는 임시 설명. 이대로는 게시되지 않습니다. */
+export const IMAGE_ALT_PLACEHOLDER = "이미지 설명을 쓰세요";
 
 export type Source = { title: string; url: string };
 
@@ -120,7 +122,7 @@ export function validatePost(post: Post): string[] {
   if (post.summary.length > 160) errors.push("summary는 160자 이하로 써주세요");
 
   for (const { alt, src } of extractImages(post.content)) {
-    if (!alt.trim()) errors.push(`이미지 설명(alt)이 비어 있습니다: ${src}`);
+    if (!alt.trim() || alt === IMAGE_ALT_PLACEHOLDER) errors.push(`이미지 설명(alt)을 써주세요: ${src}`);
     if (/^https?:\/\//.test(src)) {
       errors.push(`외부 이미지는 저작권 문제로 쓰지 않습니다. public/images/posts/${post.slug}/ 에 직접 만든 이미지를 넣어주세요: ${src}`);
     } else if (!src.startsWith("/")) {

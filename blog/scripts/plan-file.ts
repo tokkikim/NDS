@@ -58,11 +58,26 @@ export function pendingItems(file: string): PlanItem[] {
   return items;
 }
 
-export function doneCount(file: string): number {
-  if (!fs.existsSync(file)) return 0;
+/** 대기 목록을 주어진 항목들로 통째로 바꿉니다 (순서 변경·삭제·직접 추가에 사용). */
+export function savePending(file: string, items: PlanItem[]): void {
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  const [start, end] = sectionRange(lines, PENDING);
+  if (start === -1) throw new Error("계획 파일에 '## 대기' 섹션이 없습니다");
+  const body = items.flatMap((i) => [`- [ ] ${i.title.trim()}`, ...i.details.map((d) => `  - ${d.trim()}`)]);
+  lines.splice(start + 1, end - start - 1, "", ...body, "");
+  fs.writeFileSync(file, lines.join("\n"));
+}
+
+/** 완료 목록의 줄들 (최신이 위) */
+export function doneItems(file: string): string[] {
+  if (!fs.existsSync(file)) return [];
   const lines = fs.readFileSync(file, "utf8").split("\n");
   const [start, end] = sectionRange(lines, DONE);
-  return start === -1 ? 0 : lines.slice(start + 1, end).filter((l) => l.startsWith("- [x] ")).length;
+  return start === -1 ? [] : lines.slice(start + 1, end).filter((l) => l.startsWith("- [x] ")).map((l) => l.slice(6));
+}
+
+export function doneCount(file: string): number {
+  return doneItems(file).length;
 }
 
 /** 대기에서 항목을 빼고 완료 목록 맨 위에 기록합니다. */

@@ -62,8 +62,8 @@ runClaude(prompt, {
   // 어떤 경우에도 초안은 draft: true로 둡니다. 게시 여부는 사람이 정합니다.
   const raw = matter(fs.readFileSync(file, "utf8"));
   if (raw.data.draft !== true) {
-    raw.data.draft = true;
-    fs.writeFileSync(file, matter.stringify(raw.content, raw.data));
+    // gray-matter는 파싱 결과를 캐시해 공유하므로 data를 직접 바꾸지 않고 복사합니다.
+    fs.writeFileSync(file, matter.stringify(raw.content, { ...raw.data, draft: true }));
   }
   if (planItem) markDone(planFile, planItem, date, path.basename(file));
 
