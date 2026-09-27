@@ -10,11 +10,17 @@ import { todayString, topicForDate } from "../src/lib/dates";
 import { renderMarkdown } from "../src/lib/markdown";
 import { getAllPostFiles, getStreak, IMAGE_ALT_PLACEHOLDER, isPublished, parsePostFile, POSTS_DIR, PUBLIC_DIR, validatePost } from "../src/lib/posts";
 import { createPlanFile, doneItems, pendingItems, planPath, savePending, type PlanItem } from "../scripts/plan-file";
+import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
 
-if (fs.existsSync(".env.local")) process.loadEnvFile(".env.local");
+loadEnv();
 
-const PORT = Number(process.env.ADMIN_PORT ?? 4000);
+const portArg = process.argv.indexOf("--port");
+const PORT = Number(portArg > -1 ? process.argv[portArg + 1] : (process.env.ADMIN_PORT ?? 4000));
+if (Number(process.versions.node.split(".")[0]) < 20) {
+  console.error(`✖ Node.js 20 이상이 필요합니다 (현재 ${process.version}). https://nodejs.org 에서 LTS 버전을 설치하세요.`);
+  process.exit(1);
+}
 const ROOT = process.cwd();
 const STATIC_DIR = path.join(ROOT, "admin", "public");
 const RESEARCH_DIR = path.join(ROOT, "research");
@@ -25,16 +31,21 @@ const PROFILE = path.join(RESEARCH_DIR, "profile.md");
 type Job = { id: number; kind: string; label: string; status: "running" | "done" | "failed"; log: string; startedAt: string };
 const jobs: Job[] = [];
 
-function startJob(kind: string, label: string, npmScript: string, args: string[]): Job {
+function startJob(kind: string, label: string, script: string, args: string[]): Job {
   const running = jobs.find((j) => j.kind === kind && j.status === "running");
   if (running) throw new HttpError(409, `이미 실행 중인 ${label} 작업이 있습니다`);
 
   const job: Job = { id: jobs.length + 1, kind, label, status: "running", log: "", startedAt: new Date().toISOString() };
   jobs.unshift(job);
-  const child = spawn("npm", ["run", "-s", npmScript, "--", ...args], { cwd: ROOT, env: process.env });
+  const cmd = tsxCommand(`scripts/${script}.ts`, args);
+  const child = spawn(cmd.command, cmd.args, { cwd: ROOT, env: process.env });
   const append = (d: Buffer) => (job.log += d.toString());
   child.stdout.on("data", append);
   child.stderr.on("data", append);
+  child.on("error", (err) => {
+    job.status = "failed";
+    job.log += `\n[실행 실패] ${err.message}`;
+  });
   child.on("close", (code) => {
     job.status = code === 0 ? "done" : "failed";
     job.log += `\n[종료 코드 ${code}]`;
@@ -106,7 +117,9 @@ function status() {
   const today = todayString();
   const posts = allPosts();
   const published = getAllPostFiles().map(parsePostFile).filter((p) => isPublished(p, today));
-  const hasClaude = !spawnSync("claude", ["--version"], { stdio: "ignore" }).error;
+  const claude = claudeCommand(["--version"]);
+  const probe = spawnSync(claude.command, claude.args, { stdio: "ignore", shell: claude.shell });
+  const hasClaude = !probe.error && probe.status === 0;
   return {
     today,
     todayTopic: topicForDate(today),
@@ -305,9 +318,9 @@ const routes: [string, RegExp, Handler][] = [
         if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, "날짜 형식이 잘못됐습니다");
         args.push("--date", date);
       }
-      if (mode === "template") return startJob("draft", "빈 템플릿", "new", args);
+      if (mode === "template") return startJob("draft", "빈 템플릿", "new-post", args);
       if (subject?.trim()) args.push("--subject", subject.trim());
-      return startJob("draft", `AI 초안${subject ? `: ${subject}` : ""}`, "draft", args);
+      return startJob("draft", `AI 초안${subject ? `: ${subject}` : ""}`, "ai-draft", args);
     },
   ],
 
@@ -319,7 +332,8 @@ const routes: [string, RegExp, Handler][] = [
       const cmd = url.searchParams.get("cmd") ?? "";
       const words = (url.searchParams.get("q") ?? "").split(",").map((w) => w.trim()).filter(Boolean);
       if (!["keywords", "trend", "bid"].includes(cmd) || !words.length) throw new HttpError(400, "명령과 키워드를 입력하세요");
-      const r = spawnSync("npm", ["run", "-s", "naver", "--", cmd, ...words.slice(0, 20)], { cwd: ROOT, encoding: "utf8", env: process.env });
+      const tsx = tsxCommand("scripts/naver.ts", [cmd, ...words.slice(0, 20)]);
+      const r = spawnSync(tsx.command, tsx.args, { cwd: ROOT, encoding: "utf8", env: process.env });
       try {
         return JSON.parse(r.stdout);
       } catch {
@@ -376,6 +390,14 @@ const server = http.createServer(async (req, res) => {
 });
 
 // 외부에서 접근하지 못하도록 내 PC(127.0.0.1)에서만 엽니다.
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`✖ ${PORT}번 포트를 이미 쓰고 있습니다. 다른 포트로 실행하세요: npm run admin -- --port 4001`);
+  } else {
+    console.error(`✖ 대시보드를 시작하지 못했습니다: ${err.message}`);
+  }
+  process.exit(1);
+});
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`✔ 관리자 대시보드: http://localhost:${PORT}`);
+  console.log(`✔ 관리자 대시보드: http://localhost:${PORT}  (이 창을 닫으면 대시보드도 꺼집니다)`);
 });

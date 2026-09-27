@@ -31,9 +31,20 @@ AI(Claude CLI)는 **조사와 초안**을 맡고, **직접 해본 경험과 사�
 
 ## 관리자 대시보드
 
+대시보드는 **내 PC에서 직접 실행**해야 열립니다. (Node.js 20 이상 필요)
+
 ```bash
-npm run admin     # http://localhost:4000 (내 PC에서만 열림, 배포되는 블로그에는 포함되지 않음)
+git clone https://github.com/tokkikim/NDS.git     # 처음 한 번 (이미 있으면 git pull)
+cd NDS
+git checkout claude/sweet-lamport-3lgbzt          # main에 합치기 전까지
+cd blog                                           # ← 꼭 blog 폴더 안에서
+npm install                                       # 처음 한 번
+npm run admin                                     # → 브라우저에서 http://localhost:4000
 ```
+
+- 터미널 창을 닫으면 대시보드도 꺼집니다. 쓰는 동안 열어두세요.
+- 4000번 포트를 다른 프로그램이 쓰고 있으면 `npm run admin -- --port 4001` 후 http://localhost:4001
+- Windows(PowerShell·cmd)에서도 같은 명령으로 동작합니다.
 
 아래 명령들을 화면에서 버튼으로 쓸 수 있습니다. 오래 걸리는 작업(시장분석·계획·AI 초안)은 백그라운드에서 돌고, 오른쪽 아래 작업 패널에서 진행 로그를 볼 수 있습니다.
 

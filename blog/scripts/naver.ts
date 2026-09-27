@@ -4,9 +4,9 @@
 //   npm run -s naver -- bid ISA계좌 연금저축          모바일 3위 노출 평균 입찰가 (광고 단가 참고치)
 // 키가 없으면 {"available": false}를 출력하고 정상 종료합니다. 발급 방법은 README 참고.
 import crypto from "node:crypto";
-import fs from "node:fs";
+import { loadEnv } from "./proc";
 
-if (fs.existsSync(".env.local")) process.loadEnvFile(".env.local");
+loadEnv();
 
 const AD_BASE = "https://api.searchad.naver.com";
 const env = process.env;
