@@ -13,7 +13,7 @@ import { getAllPostFiles, getStreak, IMAGE_ALT_PLACEHOLDER, isPublished, parsePo
 import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
 import { buildSchedule, daysUntilEmpty, type DayPlan } from "../src/lib/schedule";
-import { dailyPlan, readDailyLog, writeDailyEntry } from "../src/lib/daily";
+import { addPracticeImage, blockNotes, dailyPlan, PRACTICE_IMAGES_DIR, practiceImagePath, readDailyLog, removePracticeImage, updatePracticeImage, writeDailyEntry } from "../src/lib/daily";
 import { guideItemFor, readGuide } from "../src/lib/guide";
 
 loadEnv();
@@ -248,6 +248,16 @@ function practiceStreak(): number {
   return n;
 }
 
+const practiceUrl = (date: string, topic: string, file: string) => `/practice-images/${date}/${topic}/${file}`;
+
+/** 글(레슨) 하나의 실천 기간 동안 찍은 스크린샷 */
+function postPracticeImages(slug: string) {
+  const post = parsePostFile(`${slug}.md`);
+  const { startDate } = readCategories();
+  const notes = blockNotes(post.topic, post.date, schedule(addDays(post.date, -60), post.date), readDailyLog(), startDate);
+  return notes.flatMap((n) => (n.images ?? []).map((i) => ({ date: n.date, topic: post.topic, ...i, url: practiceUrl(n.date, post.topic, i.file) })));
+}
+
 /** 실행 중인 가이드 작업이 다루는 레슨 id */
 function guideJobsRunning(): Set<string> {
   return new Set(jobs.filter((j) => j.kind === "guide" && j.status === "running").flatMap((j) => j.topics ?? []));
@@ -272,6 +282,7 @@ function todayView(date: string) {
     note: t.note ?? "",
     steps: t.steps,
     answers: t.answers,
+    images: t.images.map((i) => ({ ...i, url: practiceUrl(date, t.topic.slug, i.file) })),
     guide: found?.item ?? null,
     guideStale: !!found?.stale,
     guideGenerating: !!t.lesson && generating.has(t.lesson.id),
@@ -520,6 +531,50 @@ const routes: [string, RegExp, Handler][] = [
     },
   ],
 
+  // 실천 스크린샷
+  [
+    "POST",
+    /^\/api\/daily\/images$/,
+    async (req, url) => {
+      const date = url.searchParams.get("date") ?? "";
+      const topic = topicOrThrow(url.searchParams.get("topic")).slug;
+      const type = String(req.headers["content-type"] ?? "");
+      const ext = type.includes("webp") ? "webp" : type.includes("png") ? "png" : type.includes("jpeg") ? "jpg" : "";
+      if (!ext) throw new HttpError(400, "webp, png, jpg만 저장할 수 있습니다");
+      try {
+        const image = addPracticeImage(date, topic, await readBody(req, 15 * 1024 * 1024), ext, url.searchParams.get("caption") ?? "");
+        return { ...image, url: practiceUrl(date, topic, image.file) };
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+    },
+  ],
+  [
+    "PUT",
+    /^\/api\/daily\/images$/,
+    async (req) => {
+      const { date, topic, file, caption } = await readJson<{ date: string; topic: string; file: string; caption: string }>(req);
+      try {
+        updatePracticeImage(date, topicOrThrow(topic).slug, file, String(caption ?? ""));
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { ok: true };
+    },
+  ],
+  [
+    "DELETE",
+    /^\/api\/daily\/images$/,
+    (_req, url) => {
+      try {
+        removePracticeImage(url.searchParams.get("date") ?? "", topicOrThrow(url.searchParams.get("topic")).slug, url.searchParams.get("file") ?? "");
+      } catch (err) {
+        throw new HttpError(400, (err as Error).message);
+      }
+      return { ok: true };
+    },
+  ],
+
   // 달력
   [
     "GET",
@@ -610,6 +665,31 @@ const routes: [string, RegExp, Handler][] = [
         return { ok: false, errors: result.errors };
       }
       return { ok: true, ...result };
+    },
+  ],
+  // 글 편집에서 이 레슨 기간에 찍은 스크린샷을 골라 넣기
+  [
+    "GET",
+    /^\/api\/posts\/([^/]+)\/practice-images$/,
+    (_req, _url, [slug]) => {
+      if (!fs.existsSync(path.join(POSTS_DIR, `${safeSlug(slug)}.md`))) throw new HttpError(404, "글이 없습니다");
+      return postPracticeImages(slug);
+    },
+  ],
+  [
+    "POST",
+    /^\/api\/posts\/([^/]+)\/practice-images$/,
+    async (req, _url, [slug]) => {
+      if (!fs.existsSync(path.join(POSTS_DIR, `${safeSlug(slug)}.md`))) throw new HttpError(404, "글이 없습니다");
+      const { date, file } = await readJson<{ date: string; file: string }>(req);
+      const image = postPracticeImages(slug).find((i) => i.date === date && i.file === file);
+      if (!image) throw new HttpError(404, "이 글의 실천 기간에 찍은 이미지가 아닙니다");
+      const name = `${date}-${file}`;
+      const dir = path.join(PUBLIC_DIR, "images", "posts", slug);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.copyFileSync(practiceImagePath(date, image.topic, file), path.join(dir, name));
+      const src = `/images/posts/${slug}/${name}`;
+      return { src, markdown: `![${image.caption?.replace(/[[\]]/g, "") || IMAGE_ALT_PLACEHOLDER}](${src})` };
     },
   ],
   [
@@ -745,8 +825,11 @@ const server = http.createServer(async (req, res) => {
       throw new HttpError(404, "없는 API입니다");
     }
     // 글 미리보기에서 올린 이미지를 볼 수 있게 public/images 도 제공합니다.
-    const base = url.pathname.startsWith("/images/") ? PUBLIC_DIR : STATIC_DIR;
-    const file = path.normalize(path.join(base, url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname)));
+    // 실천 스크린샷(content/practice-images)도 대시보드에서 볼 수 있게 제공합니다.
+    const practice = url.pathname.startsWith("/practice-images/");
+    const base = practice ? PRACTICE_IMAGES_DIR : url.pathname.startsWith("/images/") ? PUBLIC_DIR : STATIC_DIR;
+    const rel = practice ? decodeURIComponent(url.pathname).slice("/practice-images".length) : decodeURIComponent(url.pathname);
+    const file = path.normalize(path.join(base, url.pathname === "/" ? "index.html" : rel));
     if (!file.startsWith(base) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) throw new HttpError(404, "없는 페이지입니다");
     sendFile(res, file);
   } catch (err) {

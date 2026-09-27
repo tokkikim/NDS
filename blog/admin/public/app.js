@@ -258,6 +258,117 @@ function openGuide(t, onToggle) {
   document.getElementById("modal").addEventListener("close", () => render(true), { once: true });
 }
 
+// ── 실천 스크린샷 ─────────────────────────────────────────────────────────
+
+const MAX_SHOT_WIDTH = 1600;
+
+/** 클립보드·드래그·파일에서 이미지 파일만 꺼냅니다. */
+const imageFiles = (list) => [...(list ?? [])].filter((f) => f.type?.startsWith("image/"));
+
+/** 캔버스를 webp(안 되면 jpeg)로 저장 */
+const canvasBlob = (canvas) =>
+  new Promise((resolve) => canvas.toBlob((b) => (b && b.type === "image/webp" ? resolve(b) : canvas.toBlob(resolve, "image/jpeg", 0.88)), "image/webp", 0.85));
+
+/**
+ * 스크린샷 편집 창: 개인정보(계좌번호·잔액·이름 등)를 드래그해서 가리고, 설명을 붙여 저장합니다.
+ * 긴 화면은 가로 1600px로 줄여 용량을 줄입니다.
+ */
+async function openShotEditor(file, { caption = "", onSave }) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, MAX_SHOT_WIDTH / bitmap.width);
+  const canvas = h("canvas", { class: "shot-canvas", width: Math.round(bitmap.width * scale), height: Math.round(bitmap.height * scale) });
+  const ctx = canvas.getContext("2d");
+  const boxes = [];
+  let drag = null;
+  const draw = () => {
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#2b2b2b";
+    for (const b of [...boxes, ...(drag ? [drag] : [])]) ctx.fillRect(b.x, b.y, b.w, b.h);
+  };
+  const point = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * canvas.width, y: ((e.clientY - r.top) / r.height) * canvas.height };
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    const p0 = point(e);
+    drag = { x: p0.x, y: p0.y, w: 0, h: 0, x0: p0.x, y0: p0.y };
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const p1 = point(e);
+    Object.assign(drag, { x: Math.min(drag.x0, p1.x), y: Math.min(drag.y0, p1.y), w: Math.abs(p1.x - drag.x0), h: Math.abs(p1.y - drag.y0) });
+    draw();
+  });
+  canvas.addEventListener("pointerup", () => {
+    if (drag && drag.w > 4 && drag.h > 4) boxes.push(drag);
+    drag = null;
+    draw();
+    count.textContent = boxes.length ? `가린 곳 ${boxes.length}개` : "";
+  });
+  draw();
+  const count = h("span", { class: "small muted" });
+  const captionInput = h("input", { type: "text", value: caption, placeholder: "글에서 이미지 설명이 됩니다", style: "width:100%", onkeydown: (e) => e.key === "Enter" && save.click() });
+  const save = h("button", {
+    class: "primary",
+    onclick: async () => {
+      save.disabled = true;
+      save.textContent = "저장 중…";
+      await onSave(await canvasBlob(canvas), captionInput.value.trim());
+      document.getElementById("modal").close();
+    },
+  }, "저장");
+  // 사진은 왼쪽(길면 스크롤), 설명·저장은 오른쪽에 두어 저장 버튼이 항상 보이게 합니다.
+  modal(
+    "스크린샷 저장",
+    h(
+      "div",
+      { class: "shot-layout" },
+      h("div", { class: "shot-wrap" }, canvas),
+      h(
+        "div",
+        { class: "shot-side" },
+        h("div", { class: "notice small" }, "🔒 블로그에 올라갈 수 있는 사진입니다. 계좌번호·잔액·이름·전화번호 같은 개인정보는 사진 위를 드래그해서 가리세요."),
+        h("div", { class: "row" }, h("button", { class: "ghost small", onclick: () => (boxes.pop(), draw(), (count.textContent = boxes.length ? `가린 곳 ${boxes.length}개` : "")) }, "↶ 되돌리기"), count),
+        h("label", { class: "small muted" }, "무엇을 찍었나요?"),
+        captionInput,
+        save,
+        h("div", { class: "small muted" }, `${canvas.width}×${canvas.height} · 저장할 때 용량을 줄입니다`),
+      ),
+    ),
+  );
+  captionInput.focus();
+}
+
+/** 저장한 스크린샷 크게 보기 (설명 수정·삭제) */
+function openShotViewer(img, { onCaption, onDelete }) {
+  const input = h("input", { type: "text", value: img.caption ?? "", placeholder: "무엇을 찍었나요?", style: "width:100%" });
+  modal(
+    "스크린샷",
+    h(
+      "div",
+      { class: "stack", style: "padding-top:10px" },
+      h("img", { src: img.url, alt: img.caption ?? "", class: "shot-full" }),
+      input,
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "primary", onclick: async () => (await onCaption(input.value.trim()), document.getElementById("modal").close()) }, "설명 저장"),
+        h("button", { class: "ghost danger-text", onclick: async () => confirm("이 스크린샷을 지울까요?") && (await onDelete(), document.getElementById("modal").close()) }, "삭제"),
+      ),
+    ),
+  );
+}
+
+// 오늘 화면에서 캡처(Win+Shift+S 등) 후 Ctrl+V 하면, 마지막으로 마우스를 올리거나 누른 카드에 붙습니다.
+document.addEventListener("paste", (e) => {
+  const files = imageFiles(e.clipboardData?.files);
+  if (!files.length || state.tab !== "today" || document.getElementById("modal").open) return;
+  e.preventDefault();
+  if (!state.pasteTarget?.el.isConnected) return toast("사진을 넣을 카드를 한 번 누른 뒤 붙여넣으세요");
+  state.pasteTarget.addShots(files);
+});
+
 async function renderToday() {
   state.date ??= kstToday();
   const v = await api(`/api/today?date=${state.date}`);
@@ -412,7 +523,77 @@ async function renderToday() {
       ),
     );
 
-    const answered = questions.filter((q) => t.answers[q]?.trim()).length + (t.note?.trim() ? 1 : 0);
+    // ── 스크린샷 ──
+    const shotList = h("div", { class: "shots" });
+    const picker = h("input", { type: "file", accept: "image/*", multiple: true, hidden: true, onchange: (e) => (addShots(imageFiles(e.target.files)), (e.target.value = "")) });
+    const shotQuery = (extra = "") => `date=${v.date}&topic=${t.topic.slug}${extra}`;
+    const drawShots = () =>
+      shotList.replaceChildren(
+        ...t.images.map((img) =>
+          h(
+            "button",
+            {
+              class: "shot",
+              title: img.caption || "설명 없음",
+              onclick: () =>
+                openShotViewer(img, {
+                  onCaption: (caption) => run(async () => (await api("/api/daily/images", { method: "PUT", body: { date: v.date, topic: t.topic.slug, file: img.file, caption } }), (img.caption = caption), drawShots())),
+                  onDelete: () => run(async () => (await api(`/api/daily/images?${shotQuery(`&file=${img.file}`)}`, { method: "DELETE" }), (t.images = t.images.filter((i) => i !== img)), drawShots())),
+                }),
+            },
+            h("img", { src: img.url, alt: img.caption ?? "", loading: "lazy" }),
+            img.caption ? h("span", {}, img.caption) : null,
+          ),
+        ),
+        h("button", { class: "shot shot-add", title: "스크린샷 추가 (파일 선택)", onclick: () => picker.click() }, "+ 사진"),
+      );
+    // 여러 장이면 한 장씩 가리기·설명을 거쳐 저장합니다.
+    const addShots = async (files) => {
+      for (const file of files) {
+        const current = g?.steps.find((_, i) => !t.steps.includes(i));
+        // 편집 창이 닫히면(저장·취소) 다음 사진으로 넘어갑니다.
+        await new Promise((resolve) =>
+          openShotEditor(file, {
+            caption: current?.title ?? "",
+            onSave: (blob, caption) =>
+              run(async () => {
+                const img = await api(`/api/daily/images?${shotQuery(`&caption=${encodeURIComponent(caption)}`)}`, { method: "POST", body: blob });
+                t.images = [...t.images, img];
+                drawShots();
+                // 완료해서 접힌 카드면 펼쳐서 방금 넣은 사진을 보여줍니다.
+                cardEl.classList.add("is-open");
+                toast("스크린샷을 저장했습니다");
+              }),
+          })
+            .then(() => document.getElementById("modal").addEventListener("close", resolve, { once: true }))
+            .catch(() => (toast("이미지를 열 수 없습니다"), resolve())),
+        );
+      }
+    };
+    drawShots();
+    const shotArea = h(
+      "div",
+      { class: "shot-area" },
+      h("div", { class: "row small muted", style: "justify-content:space-between" }, h("span", {}, "📷 스크린샷"), h("span", {}, "캡처 후 Ctrl+V · 끌어다 놓기")),
+      shotList,
+      picker,
+    );
+    recordArea.append(shotArea);
+    // 붙여넣기 대상 카드 (마지막으로 누르거나 마우스를 올린 카드)
+    const target = () => (state.pasteTarget = { el: cardEl, addShots });
+    cardEl.addEventListener("pointerdown", target);
+    cardEl.addEventListener("pointerenter", target);
+    cardEl.addEventListener("focusin", target);
+    cardEl.addEventListener("dragover", (e) => (e.preventDefault(), cardEl.classList.add("is-drop")));
+    cardEl.addEventListener("dragleave", () => cardEl.classList.remove("is-drop"));
+    cardEl.addEventListener("drop", (e) => {
+      e.preventDefault();
+      cardEl.classList.remove("is-drop");
+      const files = imageFiles(e.dataTransfer?.files);
+      if (files.length) addShots(files);
+    });
+
+    const answered = questions.filter((q) => t.answers[q]?.trim()).length + (t.note?.trim() ? 1 : 0) + t.images.length;
     const postArea = t.isPostDay
       ? h(
           "div",
@@ -1133,20 +1314,68 @@ async function renderEditor(slug) {
       const f = file.files[0];
       if (!f) return;
       const r = await api(`/api/posts/${slug}/images?name=${encodeURIComponent(f.name)}`, { method: "POST", body: f });
-      const at = text.selectionStart ?? text.value.length;
-      text.value = `${text.value.slice(0, at)}\n${r.markdown}\n${text.value.slice(at)}`;
-      state.dirty = true;
-      unsaved.hidden = false;
+      insertAtCursor(r.markdown);
       toast(`이미지 추가 (${r.sizeKB}KB) — 설명(alt)을 고친 뒤 저장하세요${r.sizeKB > 1024 ? ". 1MB 이하로 줄이는 걸 권장해요" : ""}`);
       file.value = "";
     }),
   );
-  text.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+  // 본문을 한 번도 누르지 않았으면 커서가 0(머리말 앞)이라 글 형식이 깨집니다.
+  // 그럴 땐 "직접 해보기" 섹션 제목 아래(없으면 글 끝)에 넣습니다.
+  let touched = false;
+  text.addEventListener("focus", () => (touched = true));
+  const insertAtCursor = (markdown) => {
+    const heading = text.value.indexOf("\n## 직접 해보기");
+    const lineEnd = heading >= 0 ? text.value.indexOf("\n", heading + 1) : -1;
+    const at = touched ? text.selectionStart : lineEnd >= 0 ? lineEnd : text.value.length;
+    text.value = `${text.value.slice(0, at)}\n${markdown}\n${text.value.slice(at)}`;
+    state.dirty = true;
+    unsaved.hidden = false;
+  };
+  // 오늘 화면에서 저장한 이 레슨 기간의 스크린샷을 골라 커서 위치에 넣습니다.
+  const pickPractice = () =>
+    run(async () => {
+      const images = await api(`/api/posts/${encodeURIComponent(slug)}/practice-images`);
+      modal(
+        "실천 사진 넣기",
+        images.length
+          ? h(
+              "div",
+              { class: "stack", style: "padding-top:10px" },
+              h("div", { class: "small muted" }, "누르면 커서 위치에 넣습니다. 설명(alt)은 필요하면 본문에서 다듬으세요."),
+              h(
+                "div",
+                { class: "shots big" },
+                ...images.map((img) =>
+                  h(
+                    "button",
+                    {
+                      class: "shot",
+                      onclick: () =>
+                        run(async () => {
+                          const r = await api(`/api/posts/${encodeURIComponent(slug)}/practice-images`, { method: "POST", body: { date: img.date, file: img.file } });
+                          insertAtCursor(r.markdown);
+                          document.getElementById("modal").close();
+                          toast("사진을 넣었습니다 — 저장하면 미리보기에 보입니다");
+                        }),
+                    },
+                    h("img", { src: img.url, alt: img.caption ?? "", loading: "lazy" }),
+                    h("span", {}, `${img.date.slice(5).replace("-", "/")} ${img.caption ?? ""}`),
+                  ),
+                ),
+              ),
+            )
+          : h("p", { class: "muted", style: "padding-top:10px" }, "이 글의 실천 기간에 저장한 스크린샷이 없습니다. 오늘 화면의 카드에서 캡처 후 Ctrl+V로 넣을 수 있어요."),
+      );
+    });
+  // Ctrl+S: 편집 화면 어디에서든 저장 (입력칸 밖을 누른 뒤에도)
+  const onKey = (e) => {
+    if (!text.isConnected) return document.removeEventListener("keydown", onKey);
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s" && !document.getElementById("modal").open) {
       e.preventDefault();
       save();
     }
-  });
+  };
+  document.addEventListener("keydown", onKey);
 
   return h(
     "div",
@@ -1158,6 +1387,7 @@ async function renderEditor(slug) {
       h(
         "div",
         { class: "row" },
+        h("button", { class: "ghost", title: "이 레슨 기간에 오늘 화면에서 저장한 스크린샷", onclick: pickPractice }, "📷 실천 사진"),
         h("button", { class: "ghost", onclick: () => file.click() }, "이미지 넣기"),
         h("button", { class: "ghost", onclick: save }, "저장 (Ctrl+S)"),
         post.status !== "초안"

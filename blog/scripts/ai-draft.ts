@@ -11,9 +11,9 @@ import matter from "gray-matter";
 import { SITE, TOPICS } from "../src/blog.config";
 import { readCurriculum } from "../src/lib/curriculum";
 import { todayString } from "../src/lib/dates";
-import { getAllPostFiles, parsePostFile, validatePost } from "../src/lib/posts";
+import { getAllPostFiles, parsePostFile, PUBLIC_DIR, validatePost } from "../src/lib/posts";
 import { buildSchedule, lessonForDate } from "../src/lib/schedule";
-import { blockNotes, readDailyLog } from "../src/lib/daily";
+import { blockNotes, practiceImagePath, readDailyLog } from "../src/lib/daily";
 import { addDays } from "../src/lib/dates";
 import { readGuide } from "../src/lib/guide";
 import { editRule, ensureClaudeCli, loadPrompt, runClaude } from "./claude";
@@ -53,6 +53,21 @@ const practiceLog = notes.length
       )
       .join("\n")
   : "(기록 없음)";
+// 운영자가 실천하며 찍은 스크린샷 → 글 이미지 폴더로 복사해 두고 Claude가 알맞은 자리에 넣게 합니다.
+const imageDir = path.join(PUBLIC_DIR, "images", "posts", slug);
+const shots = notes.flatMap((n) =>
+  (n.images ?? [])
+    .filter((i) => fs.existsSync(practiceImagePath(n.date, topic.slug, i.file)))
+    .map((i) => ({ date: n.date, caption: i.caption ?? "", src: `/images/posts/${slug}/${n.date}-${i.file}`, from: practiceImagePath(n.date, topic.slug, i.file) })),
+);
+if (shots.length) {
+  fs.mkdirSync(imageDir, { recursive: true });
+  for (const s of shots) fs.copyFileSync(s.from, path.join(PUBLIC_DIR, s.src));
+}
+const screenshots = shots.length
+  ? shots.map((s) => `- ${s.date} · ${s.caption || "(설명 없음)"} → \`${s.src}\``).join("\n")
+  : "(없음)";
+
 // 운영자가 이 레슨 동안 따라 한 단계별 가이드 → 독자용 "따라 해보기"의 뼈대
 const guide = lesson ? readGuide(topic.slug, lesson.id) : null;
 const guideText = guide
@@ -96,6 +111,7 @@ const prompt = loadPrompt("draft", {
   subject,
   practiceLog,
   guide: guideText,
+  screenshots,
   previous: previous.length ? previous.join("\n") : "(아직 없음 - 입문자가 처음 공부하기 좋은 소재로 시작)",
 });
 
@@ -106,13 +122,19 @@ runClaude(prompt, {
   model: args.model,
   inheritOutput: true,
 }).then(({ code }) => {
-  if (code !== 0) fail(`claude 실행이 실패했습니다 (종료 코드 ${code}).`);
+  if (code !== 0) {
+    for (const s of shots) fs.rmSync(path.join(PUBLIC_DIR, s.src), { force: true });
+    fail(`claude 실행이 실패했습니다 (종료 코드 ${code}).`);
+  }
   if (!fs.existsSync(file)) fail(`초안 파일이 만들어지지 않았습니다: ${relFile}`);
 
   // 어떤 경우에도 초안은 draft: true로 둡니다. 게시 여부는 사람이 정합니다.
   // 커리큘럼 레슨과 연결해 두면 달력에서 이 레슨이 "완료/작성 중"으로 표시됩니다.
   // (gray-matter는 파싱 결과를 캐시해 공유하므로 data를 직접 바꾸지 않고 복사합니다.)
   const raw = matter(fs.readFileSync(file, "utf8"));
+  // 본문에 쓰지 않은 스크린샷 복사본은 지웁니다 (원본은 content/practice-images에 그대로 있음).
+  for (const s of shots) if (!raw.content.includes(s.src)) fs.rmSync(path.join(PUBLIC_DIR, s.src), { force: true });
+  if (shots.length && fs.existsSync(imageDir) && !fs.readdirSync(imageDir).length) fs.rmdirSync(imageDir);
   fs.writeFileSync(file, matter.stringify(raw.content, { ...raw.data, ...(lesson ? { lesson: lesson.id } : {}), draft: true }));
 
   const post = parsePostFile(path.basename(file));
