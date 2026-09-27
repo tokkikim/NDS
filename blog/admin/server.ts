@@ -160,6 +160,8 @@ function postStatus(file: string) {
     topic: post.topic,
     status,
     errors,
+    // 초안을 지금 게시한다면 걸리는 문제 (TODO·직접 해보기·분량 등)
+    publishErrors: post.draft ? validatePost({ ...post, draft: false }) : errors,
     todo: post.content.includes("<!-- TODO"),
     chars: post.content.replace(/\s+/g, "").length,
   };
@@ -274,7 +276,8 @@ function todayView(date: string) {
   const events = topics
     .map((t) => ({ topic: t, event: readCurriculum(t.slug)?.event }))
     .filter((e): e is { topic: Topic; event: NonNullable<Curriculum["event"]> } => !!e.event);
-  return { date, today: todayString(), tasks, week, streak: practiceStreak(), events };
+  const { startDate } = readCategories();
+  return { date, today: todayString(), startDate, tasks, week, streak: practiceStreak(), events };
 }
 
 function status() {
@@ -419,7 +422,9 @@ const routes: [string, RegExp, Handler][] = [
           return [l.id, planned.has(l.id) ? { status: "예정", date: planned.get(l.id) } : { status: "미배정" }];
         }),
       );
-      return { topic, curriculum, lessonStatus };
+      // 가이드가 만들어진 레슨
+      const guides = Object.fromEntries((curriculum ? allLessons(curriculum) : []).filter((l) => readGuide(topic.slug, l.id)).map((l) => [l.id, true]));
+      return { topic, curriculum, lessonStatus, guides };
     },
   ],
   [

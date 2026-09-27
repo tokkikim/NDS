@@ -29,6 +29,10 @@
 * {
   box-sizing: border-box;
 }
+/* hidden 속성은 다른 display 규칙보다 항상 우선합니다. */
+[hidden] {
+  display: none !important;
+}
 body {
   margin: 0;
   background: var(--bg);
@@ -121,6 +125,27 @@ h3 {
 }
 .stack > * + * {
   margin-top: 10px;
+}
+/* 세로 목록 안의 입력 양식: 이름표는 입력칸 바로 위에, 항목 사이는 넉넉하게 */
+.stack > label,
+.stack > input,
+.stack > select,
+.stack > textarea,
+.stack > button {
+  display: block;
+}
+.stack > label {
+  margin-top: 16px;
+}
+.stack > label + * {
+  margin-top: 4px;
+}
+.clamp3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
 }
 .big {
   font-size: 1.6rem;
@@ -765,6 +790,49 @@ button.link.small {
   line-height: 1.65;
 }
 
+/* ── 커리큘럼 단계 (접기·펼치기) ── */
+details.stage {
+  margin-top: 14px;
+}
+details.stage > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+details.stage > summary::-webkit-details-marker {
+  display: none;
+}
+details.stage > summary:hover {
+  background: var(--code);
+}
+.stage-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.stage-head h3::before {
+  content: "▸ ";
+  color: var(--muted);
+}
+details.stage[open] .stage-head h3::before {
+  content: "▾ ";
+}
+.stage-body {
+  padding: 4px 0 0 0;
+}
+.cal-day.is-empty {
+  cursor: default;
+  background: transparent;
+}
+.cal-day.is-empty:hover {
+  border-color: var(--border);
+}
+.research-table td:nth-child(2) {
+  min-width: 220px;
+}
+
 /* ── 좁은 화면: 탭은 가로 스크롤, 버튼은 누르기 쉽게 ── */
 @media (max-width: 700px) {
   .top {
@@ -785,6 +853,24 @@ button.link.small {
   }
   .today-grid {
     grid-template-columns: 1fr;
+  }
+  /* 카테고리 편집: 입력칸이 잘리지 않게 한 줄에 하나씩 */
+  .plan-item {
+    flex-wrap: wrap;
+  }
+  .plan-item .body {
+    flex-basis: calc(100% - 80px);
+  }
+  .plan-item .body .row > input {
+    flex: 1 1 100%;
+    max-width: none !important;
+  }
+  .plan-item .actions {
+    margin-left: auto;
+  }
+  .cal-day .small {
+    font-size: 0.68rem;
+    word-break: break-all;
   }
   button.primary,
   button.ghost {

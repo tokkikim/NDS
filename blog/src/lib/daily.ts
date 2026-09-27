@@ -84,13 +84,14 @@ export function dailyPlan(date: string, topics: Topic[], schedule: DayPlan[], lo
     const next = turns.find((d) => d.date >= date && d.lesson);
     // 직전에 글을 쓴(또는 쓰기로 한) 날. 놓침·여유일은 블록을 끊지 않습니다. (없으면 시작일부터)
     const prev = [...turns].reverse().find((d) => d.date < date && (d.lesson || d.post));
-    const blockStart = prev ? addDays(prev.date, 1) : date < startDate ? date : startDate;
+    const blockStart = prev ? addDays(prev.date, 1) : startDate;
     const entry = log[date]?.[topic.slug];
     const record = { done: !!entry?.done, note: entry?.note, steps: entry?.steps ?? [], answers: entry?.answers ?? {} };
     if (!next?.lesson) {
       return { topic, day: 1, days: 1, index: 0, task: "커리큘럼 레슨이 없습니다. 커리큘럼에 레슨을 추가하세요.", isPostDay: false, ...record };
     }
     const days = Math.max(1, daysBetween(blockStart, next.date) + 1);
+    // 시작일 전에는 첫날 할 일을 미리 보여줍니다 (날마다 일차가 바뀌지 않도록 시작일 기준).
     const day = Math.min(days, Math.max(1, daysBetween(blockStart, date) + 1));
     const daily = next.lesson.daily?.length ? next.lesson.daily : null;
     // 블록 길이가 daily 수와 다를 때(날짜 고정·여유일 등):
