@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SITE, TOPICS } from "@/blog.config";
+import { SITE } from "@/blog.config";
+import { getVisibleTopics } from "@/lib/posts";
 
 export const metadata: Metadata = { title: "소개", alternates: { canonical: "/about" } };
 
@@ -17,7 +18,7 @@ export default function AboutPage() {
 
       <h2>공부하는 주제</h2>
       <ul>
-        {TOPICS.map((t) => (
+        {getVisibleTopics().map((t) => (
           <li key={t.slug}>
             <Link href={`/topics/${t.slug}`}>{t.name}</Link> — {t.description}
           </li>

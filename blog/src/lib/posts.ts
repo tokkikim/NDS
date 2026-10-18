@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
-import { getTopic } from "../blog.config";
+import { getTopic, TOPICS, type Topic } from "../blog.config";
 import { addDays, todayString } from "./dates";
 
 export const POSTS_DIR = path.join(process.cwd(), "content", "posts");
@@ -90,6 +90,12 @@ export function getStaticSlugs(): { slug: string }[] {
 
 export function getPost(slug: string): Post | undefined {
   return getPublishedPosts().find((p) => p.slug === slug);
+}
+
+/** 블로그에 보여줄 카테고리: 진행 중이거나, 보류했어도 게시된 글이 있는 카테고리 */
+export function getVisibleTopics(): Topic[] {
+  const published = getPublishedPosts();
+  return TOPICS.filter((t) => !t.paused || published.some((p) => p.topic === t.slug));
 }
 
 export function getPostsByTopic(topic: string): Post[] {

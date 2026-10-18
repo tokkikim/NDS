@@ -8,10 +8,10 @@
 // 이미 글로 쓴 레슨은 다시 만들 때도 그대로 보존됩니다.
 import fs from "node:fs";
 import path from "node:path";
-import { getTopic, SITE, TOPICS } from "../src/blog.config";
+import { ACTIVE_TOPICS, CATEGORIES, getTopic, SITE, TOPICS } from "../src/blog.config";
 import { allLessons, curriculumPath, readCurriculum, writeCurriculum, type Curriculum } from "../src/lib/curriculum";
-import { addDays, todayString } from "../src/lib/dates";
-import { topicForDateIn } from "../src/lib/schedule";
+import { addDays, daysBetween, todayString } from "../src/lib/dates";
+import { rotationTopic } from "../src/lib/rotation";
 import { getAllPostFiles, parsePostFile } from "../src/lib/posts";
 import { editRule, ensureClaudeCli, loadPrompt, NAVER_TOOL, runClaude } from "./claude";
 import { fail, parseArgs } from "./lib";
@@ -41,7 +41,12 @@ const event = args["event-date"]
 // 대회가 있으면: 오늘(또는 시작일)부터 대회 전날까지 이 카테고리 차례 수 + 대회 당일 + 대회 후 회복·분석 4개
 const from = todayString() > SITE.rotationStart ? todayString() : SITE.rotationStart;
 let turnsBeforeEvent = 0;
-if (event) for (let d = from; d < event.date; d = addDays(d, 1)) if (topicForDateIn(SITE.rotationStart, TOPICS, d)?.slug === topic.slug) turnsBeforeEvent++;
+// 차례 간격: 진행 중인 카테고리 수 (보류 중인 카테고리를 미리 설계하면 진행으로 바꿨을 때 기준 +1)
+const CADENCE = Math.max(1, ACTIVE_TOPICS.length + (topic.paused ? 1 : 0));
+if (event) {
+  if (topic.paused) turnsBeforeEvent = Math.floor(Math.max(0, daysBetween(from, event.date)) / CADENCE);
+  else for (let d = from; d < event.date; d = addDays(d, 1)) if (rotationTopic(CATEGORIES, d)?.slug === topic.slug) turnsBeforeEvent++;
+}
 if (event && !append && args.lessons === undefined) count = turnsBeforeEvent + 1 + 4;
 
 // 글로 이미 쓴 레슨 id (초안 포함) — 다시 만들 때 반드시 남아 있어야 합니다.
@@ -71,9 +76,9 @@ const prompt = fillDaily
       topicName: topic.name,
       topicDescription: topic.description,
       file: relFile,
-      cadence: String(TOPICS.length),
-      last: String(TOPICS.length - 1),
-      others: String(TOPICS.length - 1),
+      cadence: String(CADENCE),
+      last: String(CADENCE - 1),
+      others: String(CADENCE - 1),
     })
   : loadPrompt("curriculum", {
   topicName: topic.name,
@@ -82,14 +87,14 @@ const prompt = fillDaily
   file: relFile,
   mode: append ? `기존 커리큘럼 뒤에 레슨 ${count}개 추가` : existing ? "커리큘럼 다시 설계" : "커리큘럼 새로 만들기",
   date: todayString(),
-  topicCount: String(TOPICS.length),
-  cadence: String(TOPICS.length),
+  topicCount: String(CADENCE),
+  cadence: String(CADENCE),
   research: reports.length ? reports.join(", ") : "(없음)",
   existing: existing ? JSON.stringify(existing, null, 1) : "(없음)",
   lessonCount: append ? `기존 레슨 뒤에 ${count}개 추가` : `총 ${count}개 안팎`,
   duration: append
-    ? `기존 레슨 ${existingCount}개(약 ${existingCount * TOPICS.length}일) 뒤에 이어서 ${count}개 × ${TOPICS.length}일 = 약 ${count * TOPICS.length}일(${Math.round((count * TOPICS.length) / 7)}주)을 추가합니다. 새 레슨은 시작 후 ${existingCount * TOPICS.length}일째부터입니다.`
-    : `레슨 ${count}개 × ${TOPICS.length}일 = 전체 약 ${count * TOPICS.length}일(약 ${Math.round((count * TOPICS.length) / 7)}주, ${Math.round((count * TOPICS.length) / 30)}개월)입니다.`,
+    ? `기존 레슨 ${existingCount}개(약 ${existingCount * CADENCE}일) 뒤에 이어서 ${count}개 × ${CADENCE}일 = 약 ${count * CADENCE}일(${Math.round((count * CADENCE) / 7)}주)을 추가합니다. 새 레슨은 시작 후 ${existingCount * CADENCE}일째부터입니다.`
+    : `레슨 ${count}개 × ${CADENCE}일 = 전체 약 ${count * CADENCE}일(약 ${Math.round((count * CADENCE) / 7)}주, ${Math.round((count * CADENCE) / 30)}개월)입니다.`,
   keepRule,
   event: event
     ? [
@@ -145,11 +150,11 @@ runClaude(prompt, {
     const before = allLessons(existing!).map((l) => `${l.id}|${l.title}|${l.task}|${l.date ?? ""}`).join("\n");
     const after = allLessons(saved).map((l) => `${l.id}|${l.title}|${l.task}|${l.date ?? ""}`).join("\n");
     if (before !== after) restore("매일 할 일을 채우는 중에 레슨 내용이 바뀌었습니다");
-    const missing = allLessons(saved).filter((l) => (l.daily?.length ?? 0) !== TOPICS.length).length;
-    if (missing) console.log(`  ⚠ daily가 ${TOPICS.length}개가 아닌 레슨 ${missing}개 — 커리큘럼 탭에서 확인하세요`);
+    const missing = allLessons(saved).filter((l) => (l.daily?.length ?? 0) !== CADENCE).length;
+    if (missing) console.log(`  ⚠ daily가 ${CADENCE}개가 아닌 레슨 ${missing}개 — 커리큘럼 탭에서 확인하세요`);
   }
 
   const total = allLessons(saved).length;
-  console.log(`\n✔ ${relFile}: ${saved.stages.length}단계 · 레슨 ${total}개 (약 ${total * TOPICS.length}일 분량)`);
+  console.log(`\n✔ ${relFile}: ${saved.stages.length}단계 · 레슨 ${total}개 (약 ${total * CADENCE}일 분량)`);
   console.log(`  목표: ${saved.goal}`);
 });

@@ -8,14 +8,20 @@ export type Topic = {
   description: string;
   /** 카드·배지에 쓰이는 색 */
   color: string;
+  /** 보류: 매일 할 일·글 순환에서 빠짐 (커리큘럼과 글은 유지) */
+  paused?: boolean;
 };
 
 // 카테고리와 순환 시작일은 content/topics.json 에 있습니다 (대시보드 "카테고리" 탭에서 편집).
 export const TOPICS: Topic[] = categories.topics;
+/** 진행/보류에 따른 순환 구간 (src/lib/rotation.ts) */
+export const CATEGORIES = categories as { startDate: string; topics: Topic[]; rotations?: { from: string; topics: string[] }[] };
+/** 지금 진행 중인 카테고리 */
+export const ACTIVE_TOPICS: Topic[] = TOPICS.filter((t) => !t.paused);
 
 export const SITE = {
   name: "매일 한 걸음 공부노트",
-  description: "세 가지 주제를 하루 하나씩, 직접 공부하며 기록하는 블로그",
+  description: "관심 있는 주제를 하루 하나씩, 직접 공부하고 해보며 기록하는 블로그",
   // 배포 도메인. 환경변수가 없으면 로컬 주소를 씁니다.
   url: (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(/\/$/, ""),
   author: "공부노트 운영자",

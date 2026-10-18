@@ -902,6 +902,30 @@ button.danger-text:hover {
   border-radius: 8px;
 }
 
+/* ── 진행/보류 ── */
+.status-toggle {
+  border: 1px solid var(--go);
+  color: var(--go);
+  background: transparent;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.status-toggle.is-paused {
+  border-color: var(--border);
+  color: var(--muted);
+}
+.plan-item.is-paused > :not(.actions) {
+  opacity: 0.6;
+}
+button.is-paused:not(.primary) {
+  color: var(--muted);
+}
+.paused-row button span {
+  font-size: 0.7rem;
+}
+
 /* ── 커리큘럼 단계 (접기·펼치기) ── */
 details.stage {
   margin-top: 14px;

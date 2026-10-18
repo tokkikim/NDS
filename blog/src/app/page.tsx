@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { SITE, TOPICS } from "@/blog.config";
+import { SITE } from "@/blog.config";
 import { PostCard } from "@/components/PostCard";
 import { StudyCalendar } from "@/components/StudyCalendar";
-import { getPublishedPosts, getStreak } from "@/lib/posts";
+import { getPublishedPosts, getStreak, getVisibleTopics } from "@/lib/posts";
 
 export default function Home() {
   const posts = getPublishedPosts();
@@ -25,7 +25,7 @@ export default function Home() {
           <span>누적 기록</span>
         </div>
         <div className="stat">
-          <b>{TOPICS.length}개</b>
+          <b>{getVisibleTopics().length}개</b>
           <span>공부 주제</span>
         </div>
       </div>
@@ -34,7 +34,7 @@ export default function Home() {
 
       <h2 className="section-title">공부 주제</h2>
       <div className="topic-grid">
-        {TOPICS.map((t) => (
+        {getVisibleTopics().map((t) => (
           <Link key={t.slug} href={`/topics/${t.slug}`} className="topic-card" style={{ borderLeftColor: t.color }}>
             <b>{t.name}</b>
             <span>{t.description}</span>

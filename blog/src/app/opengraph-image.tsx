@@ -1,4 +1,5 @@
-import { SITE, TOPICS } from "@/blog.config";
+import { SITE } from "@/blog.config";
+import { getVisibleTopics } from "@/lib/posts";
 import { OG_SIZE, renderOgImage } from "@/lib/og";
 
 export const dynamic = "force-static";
@@ -9,7 +10,7 @@ export const alt = SITE.name;
 export default function Image() {
   return renderOgImage({
     title: SITE.description,
-    label: TOPICS.map((t) => t.name).join(" · "),
-    color: TOPICS[0].color,
+    label: getVisibleTopics().map((t) => t.name).join(" · "),
+    color: getVisibleTopics()[0]?.color ?? "#5b4df0",
   });
 }

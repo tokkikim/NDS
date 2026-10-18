@@ -6,7 +6,7 @@
 //   npm run guide -- --date 2026-09-28 --only marathon-003,english-002   # 그날 레슨 중 이것만
 import fs from "node:fs";
 import path from "node:path";
-import { SITE, TOPICS, type Topic } from "../src/blog.config";
+import { ACTIVE_TOPICS, CATEGORIES, SITE, TOPICS, type Topic } from "../src/blog.config";
 import { readCurriculum, type Curriculum, type Lesson } from "../src/lib/curriculum";
 import { dailyPlan, readDailyLog } from "../src/lib/daily";
 import { addDays, todayString } from "../src/lib/dates";
@@ -58,8 +58,9 @@ if (args.lesson) {
   const date = args.date ?? todayString();
   const curricula = Object.fromEntries(TOPICS.map((t) => [t.slug, readCurriculum(t.slug)]));
   const posts = getAllPostFiles().map(parsePostFile);
-  const schedule = buildSchedule({ startDate: SITE.rotationStart, topics: TOPICS, curricula, posts, today: todayString(), from: addDays(date, -21), to: addDays(date, 60) });
-  const topics = args.topic ? TOPICS.filter((t) => t.slug === args.topic) : TOPICS;
+  const schedule = buildSchedule({ startDate: SITE.rotationStart, topics: TOPICS, rotations: CATEGORIES.rotations, curricula, posts, today: todayString(), from: addDays(date, -21), to: addDays(date, 60) });
+  // 그날 할 일은 진행 중인 카테고리만 (보류 카테고리도 --topic --lesson으로는 만들 수 있음)
+  const topics = args.topic ? ACTIVE_TOPICS.filter((t) => t.slug === args.topic) : ACTIVE_TOPICS;
   targets = dailyPlan(date, topics, schedule, readDailyLog(), SITE.rotationStart)
     .map((d) => (d.lesson ? findLesson(d.topic, d.lesson.id) : null))
     .filter((t): t is Target => !!t);

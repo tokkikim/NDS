@@ -13,6 +13,7 @@ import { getAllPostFiles, getStreak, IMAGE_ALT_PLACEHOLDER, isPublished, parsePo
 import { claudeCommand, loadEnv, tsxCommand } from "../scripts/proc";
 import { CRITERIA, type ResearchResult, totalScore, validateResearch, verdict } from "../scripts/scoring";
 import { buildSchedule, daysUntilEmpty, type DayPlan } from "../src/lib/schedule";
+import { activeTopics, type Categories, nextRotations, rotationsOf } from "../src/lib/rotation";
 import { addPracticeImage, blockNotes, dailyPlan, PRACTICE_IMAGES_DIR, practiceImagePath, readDailyLog, removePracticeImage, updatePracticeImage, writeDailyEntry } from "../src/lib/daily";
 import { guideItemFor, readGuide } from "../src/lib/guide";
 
@@ -32,17 +33,32 @@ const CATEGORIES_FILE = path.join(ROOT, "content", "topics.json");
 
 // ── 카테고리·커리큘럼·일정 (대시보드에서 바뀌므로 매번 파일에서 새로 읽습니다) ──
 
-type Categories = { startDate: string; topics: Topic[] };
-
 function readCategories(): Categories {
   return JSON.parse(fs.readFileSync(CATEGORIES_FILE, "utf8")) as Categories;
 }
 
+/** 카테고리 저장. 진행/보류·순서가 바뀌면 오늘부터 새 순환 구간을 기록합니다 (지난 달력은 그대로). */
+function saveCategories(next: { startDate: string; topics: Topic[] }): Categories {
+  if (!next.topics.some((t) => !t.paused)) throw new HttpError(400, "진행 중인 카테고리가 하나 이상 있어야 합니다");
+  const rotations = nextRotations(readCategories(), next, todayString());
+  fs.writeFileSync(CATEGORIES_FILE, `${JSON.stringify({ ...next, ...(rotations ? { rotations } : {}) }, null, 2)}\n`);
+  return readCategories();
+}
+
+/** 그날 진행 중이던 카테고리 (보류·순서 변경 이력 반영) */
+function activeOn(c: Categories, date: string): Topic[] {
+  const segment = rotationsOf(c)
+    .filter((r) => r.from <= date)
+    .pop();
+  const slugs = segment?.topics ?? activeTopics(c).map((t) => t.slug);
+  return slugs.map((slug) => c.topics.find((t) => t.slug === slug)).filter((t): t is Topic => !!t);
+}
+
 function schedule(from: string, to: string): DayPlan[] {
-  const { startDate, topics } = readCategories();
+  const { startDate, topics, rotations } = readCategories();
   const curricula = Object.fromEntries(topics.map((t) => [t.slug, readCurriculum(t.slug)]));
   const posts = getAllPostFiles().map(parsePostFile);
-  return buildSchedule({ startDate, topics, curricula, posts, today: todayString(), from, to });
+  return buildSchedule({ startDate, topics, rotations, curricula, posts, today: todayString(), from, to });
 }
 
 // ── 백그라운드 작업 (시장분석·커리큘럼·초안은 몇 분씩 걸립니다) ──────────────────
@@ -228,16 +244,22 @@ function researchResults() {
 
 // ── 매일 실천 ──────────────────────────────────────────────────────────────
 
+/** 그날의 할 일 (그날 진행 중인 카테고리만) */
 function dailyFor(date: string) {
-  const { startDate, topics } = readCategories();
-  return dailyPlan(date, topics, schedule(addDays(date, -21), addDays(date, 60)), readDailyLog(), startDate);
+  const c = readCategories();
+  return dailyPlan(date, activeOn(c, date), schedule(addDays(date, -21), addDays(date, 60)), readDailyLog(), c.startDate);
 }
 
 /** 오늘(아직 다 못 했으면 어제)부터 거꾸로, 모든 카테고리 할 일을 체크한 연속 일수 */
 function practiceStreak(): number {
-  const { startDate, topics } = readCategories();
+  const c = readCategories();
+  const { startDate } = c;
   const log = readDailyLog();
-  const allDone = (d: string) => topics.every((t) => log[d]?.[t.slug]?.done);
+  // 그날 진행 중이던 카테고리를 모두 체크했는지 (보류한 카테고리는 세지 않음)
+  const allDone = (d: string) => {
+    const active = activeOn(c, d);
+    return active.length > 0 && active.every((t) => log[d]?.[t.slug]?.done);
+  };
   let d = todayString();
   if (!allDone(d)) d = addDays(d, -1);
   let n = 0;
@@ -264,7 +286,7 @@ function guideJobsRunning(): Set<string> {
 }
 
 function todayView(date: string) {
-  const { topics } = readCategories();
+  const c = readCategories();
   const log = readDailyLog();
   const generating = guideJobsRunning();
   const tasks = dailyFor(date).map((t) => {
@@ -291,13 +313,14 @@ function todayView(date: string) {
   // 선택한 날 기준 앞뒤 일주일의 실천 현황
   const week = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(date, i - 3);
-    return { date: d, topics: topics.map((t) => ({ slug: t.slug, color: t.color, done: !!log[d]?.[t.slug]?.done })) };
+    return { date: d, topics: activeOn(c, d).map((t) => ({ slug: t.slug, color: t.color, done: !!log[d]?.[t.slug]?.done })) };
   });
-  const events = topics
+  // 대회 D-day는 진행 중인 카테고리만
+  const events = activeTopics(c)
     .map((t) => ({ topic: t, event: readCurriculum(t.slug)?.event }))
     .filter((e): e is { topic: Topic; event: NonNullable<Curriculum["event"]> } => !!e.event);
-  const { startDate } = readCategories();
-  return { date, today: todayString(), startDate, tasks, week, streak: practiceStreak(), events };
+  const paused = c.topics.filter((t) => t.paused).map((t) => ({ slug: t.slug, name: t.name, color: t.color }));
+  return { date, today: todayString(), startDate: c.startDate, tasks, week, streak: practiceStreak(), events, paused };
 }
 
 function status() {
@@ -403,6 +426,7 @@ const routes: [string, RegExp, Handler][] = [
         name: String(t.name ?? "").trim(),
         description: String(t.description ?? "").trim(),
         color: String(t.color ?? "").trim(),
+        ...(t.paused ? { paused: true } : {}),
       }));
       for (const t of topics) {
         if (!/^[a-z0-9][a-z0-9-]{1,29}$/.test(t.slug)) throw new HttpError(400, `주소용 영문 이름이 잘못됐습니다: "${t.slug}" (영어 소문자·숫자·하이픈 2~30자)`);
@@ -415,8 +439,20 @@ const routes: [string, RegExp, Handler][] = [
       const removed = readCategories().topics.filter((old) => !topics.some((t) => t.slug === old.slug));
       const blocked = removed.filter((t) => posts.some((p) => p.topic === t.slug));
       if (blocked.length) throw new HttpError(409, `글이 있는 카테고리는 지울 수 없습니다: ${blocked.map((t) => t.name).join(", ")}`);
-      fs.writeFileSync(CATEGORIES_FILE, `${JSON.stringify({ startDate: body.startDate, topics }, null, 2)}\n`);
-      return readCategories();
+      return saveCategories({ startDate: body.startDate, topics });
+    },
+  ],
+  [
+    "PATCH",
+    /^\/api\/categories\/([^/]+)$/,
+    async (req, _url, [slug]) => {
+      // 진행/보류 바로 바꾸기 (오늘 화면·커리큘럼 탭에서)
+      const { paused } = await readJson<{ paused: boolean }>(req);
+      const c = readCategories();
+      if (!c.topics.some((t) => t.slug === slug)) throw new HttpError(404, "없는 카테고리입니다");
+      // paused: undefined는 JSON으로 저장할 때 빠집니다.
+      const topics = c.topics.map((t) => (t.slug === slug ? { ...t, paused: paused ? true : undefined } : t));
+      return saveCategories({ startDate: c.startDate, topics });
     },
   ],
 
@@ -585,8 +621,8 @@ const routes: [string, RegExp, Handler][] = [
       const from = `${month}-01`;
       const to = addDays(addDays(from, 31).slice(0, 7) + "-01", -1);
       const log = readDailyLog();
-      const { topics } = readCategories();
-      const days = schedule(from, to).map((d) => ({ ...d, practice: topics.map((t) => ({ slug: t.slug, color: t.color, done: !!log[d.date]?.[t.slug]?.done })) }));
+      const c = readCategories();
+      const days = schedule(from, to).map((d) => ({ ...d, practice: activeOn(c, d.date).map((t) => ({ slug: t.slug, color: t.color, done: !!log[d.date]?.[t.slug]?.done })) }));
       return { month, today: todayString(), days };
     },
   ],

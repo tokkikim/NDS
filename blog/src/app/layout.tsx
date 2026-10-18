@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Script from "next/script";
-import { ADSENSE, SITE, TOPICS } from "@/blog.config";
+import { ADSENSE, SITE } from "@/blog.config";
+import { getVisibleTopics } from "@/lib/posts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -30,7 +31,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               {SITE.name}
             </Link>
             <nav className="nav">
-              {TOPICS.map((t) => (
+              {getVisibleTopics().map((t) => (
                 <Link key={t.slug} href={`/topics/${t.slug}`}>
                   {t.name}
                 </Link>

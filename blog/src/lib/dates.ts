@@ -1,4 +1,5 @@
-import { SITE, TOPICS, type Topic } from "../blog.config";
+import { ACTIVE_TOPICS, CATEGORIES, SITE, TOPICS, type Topic } from "../blog.config";
+import { rotationTopic } from "./rotation";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -21,10 +22,9 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
 }
 
-/** 날짜별 주제 로테이션: 기준일부터 하루씩 TOPICS를 순환합니다. */
+/** 그날 차례인 카테고리 (진행 중인 카테고리 순환. 시작 전이면 첫 진행 카테고리) */
 export function topicForDate(date: string): Topic {
-  const n = daysBetween(SITE.rotationStart, date);
-  return TOPICS[((n % TOPICS.length) + TOPICS.length) % TOPICS.length];
+  return rotationTopic(CATEGORIES, date) ?? ACTIVE_TOPICS[0] ?? TOPICS[0];
 }
 
 export function formatKoreanDate(date: string): string {

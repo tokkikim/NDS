@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
-import { SITE, TOPICS } from "../src/blog.config";
+import { CATEGORIES, SITE, TOPICS } from "../src/blog.config";
 import { readCurriculum } from "../src/lib/curriculum";
 import { todayString } from "../src/lib/dates";
 import { getAllPostFiles, parsePostFile, PUBLIC_DIR, validatePost } from "../src/lib/posts";
@@ -24,7 +24,7 @@ const resolved = resolveDateAndTopic(args);
 const date = resolved.date;
 const allPosts = getAllPostFiles().map(parsePostFile);
 const curricula = Object.fromEntries(TOPICS.map((t) => [t.slug, readCurriculum(t.slug)]));
-const scheduleInput = { startDate: SITE.rotationStart, topics: TOPICS, curricula, posts: allPosts, today: todayString() };
+const scheduleInput = { startDate: SITE.rotationStart, topics: TOPICS, rotations: CATEGORIES.rotations, curricula, posts: allPosts, today: todayString() };
 // --topic이 없으면 달력의 그날 카테고리를 씁니다 (대회 당일처럼 날짜가 고정된 레슨이면 순환과 다를 수 있음).
 const topic = args.topic ? resolved.topic : (buildSchedule({ ...scheduleInput, from: date, to: date })[0]?.topic ?? resolved.topic);
 const file = postPath(date, topic);

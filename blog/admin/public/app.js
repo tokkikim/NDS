@@ -179,6 +179,16 @@ function dayDetail(d, { compact = false } = {}) {
   );
 }
 
+/** 카테고리 진행/보류 바꾸기 */
+const setPaused = (topic, paused) =>
+  run(async () => {
+    if (paused && !confirm(`"${topic.name}"을(를) 보류할까요?\n\n오늘부터 매일 할 일과 글 순환에서 빠집니다. 커리큘럼·가이드·글·기록은 그대로 남고, 다시 시작하면 이어서 합니다.`)) return;
+    await api(`/api/categories/${topic.slug}`, { method: "PATCH", body: { paused } });
+    state.topics = await api("/api/topics");
+    toast(paused ? `보류했습니다: ${topic.name}` : `다시 시작합니다: ${topic.name}`);
+    render(true);
+  });
+
 // ── 오늘 ───────────────────────────────────────────────────────────────────
 
 const kstToday = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
@@ -401,6 +411,7 @@ async function renderToday() {
         h("strong", { style: `color:${t.topic.color}` }, t.topic.name),
         h("div", { class: "muted" }, "아직 커리큘럼이 없어서 매일 할 일이 없어요. 커리큘럼을 만들면 레슨마다 할 일과 가이드가 생깁니다."),
         h("button", { class: "primary", onclick: () => ((state.curTopic = t.topic.slug), go("curriculum")) }, "커리큘럼 만들러 가기"),
+        h("button", { class: "ghost", onclick: () => setPaused(t.topic, true) }, "⏸ 지금은 보류하기"),
       );
     }
     const g = t.guide;
@@ -675,6 +686,14 @@ async function renderToday() {
       totalMinutes ? h("span", { class: "small muted", title: "가이드가 있는 할 일의 예상 시간 합계" }, `⏱ 약 ${minutesText(totalMinutes)}`) : null,
       missingGuides ? h("button", { class: "ghost small", onclick: () => startGuide({ date: v.date }) }, `📘 가이드 한 번에 만들기 (${missingGuides})`) : null,
     ),
+    v.paused.length
+      ? h(
+          "div",
+          { class: "row small muted paused-row" },
+          h("span", {}, "⏸ 보류 중"),
+          ...v.paused.map((t) => h("button", { class: "ghost small", title: "다시 시작하기", onclick: () => setPaused(t, false) }, h("span", { style: `color:${t.color}` }, "●"), ` ${t.name} ▶ 시작`)),
+        )
+      : null,
     v.date < v.startDate
       ? h("div", { class: "notice" }, `순환은 ${koreanDate(v.startDate)}부터 시작해요. 지금은 첫날 할 일을 미리 보는 중입니다. 가이드를 미리 만들어 두면 좋아요.`)
       : null,
@@ -762,7 +781,7 @@ async function renderCategories() {
       ...rows.map((t, i) =>
         h(
           "div",
-          { class: "plan-item" },
+          { class: `plan-item${t.paused ? " is-paused" : ""}` },
           h("span", { class: "num" }, i + 1),
           h("input", { type: "color", value: t.color, oninput: (e) => (t.color = e.target.value) }),
           h(
@@ -775,7 +794,16 @@ async function renderCategories() {
               h("input", { type: "text", value: t.slug, placeholder: "주소용 영문 (예: marathon)", readOnly: !t.isNew, title: t.isNew ? "" : "만든 뒤에는 바꿀 수 없습니다 (글·커리큘럼 주소)", style: "max-width:200px", oninput: (e) => (t.slug = e.target.value.trim()) }),
             ),
             h("input", { type: "text", value: t.description, placeholder: "한 줄 설명 (블로그 카테고리 페이지에 표시)", style: "width:100%", oninput: (e) => (t.description = e.target.value) }),
-            h("div", { class: "muted small" }, `글 ${t.posts ?? 0}개${t.isNew ? " · 새 카테고리" : ""}`),
+            h(
+              "div",
+              { class: "row small" },
+              h(
+                "button",
+                { class: `status-toggle${t.paused ? " is-paused" : ""}`, title: "눌러서 진행/보류 바꾸기 (저장해야 적용)", onclick: () => ((t.paused = !t.paused), draw()) },
+                t.paused ? "⏸ 보류" : "▶ 진행 중",
+              ),
+              h("span", { class: "muted" }, `글 ${t.posts ?? 0}개${t.isNew ? " · 새 카테고리" : ""}`),
+            ),
           ),
           h(
             "div",
@@ -791,7 +819,7 @@ async function renderCategories() {
 
   const save = () =>
     run(async () => {
-      await api("/api/categories", { method: "PUT", body: { startDate: start.value, topics: rows.map(({ slug, name, description, color }) => ({ slug, name, description, color })) } });
+      await api("/api/categories", { method: "PUT", body: { startDate: start.value, topics: rows.map(({ slug, name, description, color, paused }) => ({ slug, name, description, color, ...(paused ? { paused: true } : {}) })) } });
       state.topics = await api("/api/topics");
       toast("저장했습니다");
       render(true);
@@ -801,7 +829,11 @@ async function renderCategories() {
     "div",
     { class: "stack" },
     h("h2", {}, "카테고리"),
-    h("p", { class: "muted small" }, "위에서부터 순서대로 하루씩 돌아가며 씁니다. 시작일이 첫 번째 카테고리의 날입니다. 순서·시작일을 바꾸면 오늘 이후 달력이 다시 계산됩니다."),
+    h(
+      "p",
+      { class: "muted small" },
+      "진행 중인 카테고리만 위에서부터 순서대로 하루씩 돌아가며 씁니다. 한꺼번에 시작하기 부담되면 일부는 ⏸ 보류해 두세요 — 매일 할 일·글 순환에서 빠지고, 커리큘럼·글·기록은 그대로 남습니다. 진행/보류·순서를 바꾸면 오늘부터 새로 계산되고, 지난 달력은 그대로입니다.",
+    ),
     h("div", { class: "card row" }, h("span", {}, "순환 시작일"), start),
     list,
     h(
@@ -818,7 +850,14 @@ async function renderCategories() {
 async function renderCurriculum() {
   if (!state.topics.some((t) => t.slug === state.curTopic)) state.curTopic = state.topics[0]?.slug;
   const { topic, curriculum, lessonStatus, guides } = await api(`/api/curriculum?topic=${state.curTopic}`);
-  const tabs = h("div", { class: "row" }, ...state.topics.map((t) => h("button", { class: t.slug === state.curTopic ? "primary" : "ghost", onclick: () => ((state.curTopic = t.slug), render(true)) }, t.name)));
+  const tabs = h(
+    "div",
+    { class: "row" },
+    ...state.topics.map((t) => h("button", { class: `${t.slug === state.curTopic ? "primary" : "ghost"}${t.paused ? " is-paused" : ""}`, title: t.paused ? "보류 중" : "", onclick: () => ((state.curTopic = t.slug), render(true)) }, t.paused ? `⏸ ${t.name}` : t.name)),
+  );
+  const pausedNote = topic.paused
+    ? h("div", { class: "notice small row" }, h("span", {}, "⏸ 보류 중인 카테고리입니다. 커리큘럼은 미리 만들어 둘 수 있고, 시작하면 매일 할 일과 글 순환에 들어갑니다."), h("button", { class: "primary small", onclick: () => setPaused(topic, false) }, "▶ 지금 시작하기"))
+    : null;
   const count = h("input", { type: "number", value: 30, min: 5, max: 60, style: "width:80px" });
   const generate = (append) =>
     run(async () => {
@@ -832,6 +871,7 @@ async function renderCurriculum() {
       { class: "stack" },
       h("h2", {}, "커리큘럼"),
       tabs,
+      pausedNote,
       h(
         "div",
         { class: "card stack" },
@@ -976,6 +1016,7 @@ async function renderCurriculum() {
     { class: "stack" },
     h("h2", {}, "커리큘럼"),
     tabs,
+    pausedNote,
     h(
       "div",
       { class: "card stack", style: `border-left:4px solid ${topic.color}` },
@@ -1034,7 +1075,7 @@ async function renderCurriculum() {
             h(
               "div",
               { style: "min-width:0" },
-              h("h3", { style: "margin:0" }, s.title, isCurrent ? h("span", { class: "badge b-today", style: "margin-left:8px" }, "진행 중") : null),
+              h("h3", { style: "margin:0" }, s.title, isCurrent ? h("span", { class: "badge b-today", style: "margin-left:8px" }, "현재 단계") : null),
               h("div", { class: "muted small" }, `레슨 ${s.lessons.length}개 · 완료 ${stageDone}${dates.length ? ` · ${dates[0]} ~ ${dates[dates.length - 1]}` : ""}`),
               s.goal ? h("div", { class: "muted small" }, `목표: ${s.goal}`) : null,
             ),

@@ -9,6 +9,7 @@ import type { Topic } from "../blog.config";
 import { allLessons, type Curriculum, type Lesson } from "./curriculum";
 import { addDays, daysBetween } from "./dates";
 import type { Post } from "./posts";
+import { rotationTopic, type Rotation } from "./rotation";
 
 export type DayStatus = "게시" | "예약" | "초안" | "오늘" | "예정" | "놓침" | "여유" | "레슨 없음" | "시작 전";
 
@@ -22,7 +23,10 @@ export type DayPlan = {
 
 type Input = {
   startDate: string;
+  /** 모든 카테고리 (보류 포함). 순환에는 진행 중인 카테고리만 들어갑니다. */
   topics: Topic[];
+  /** 진행/보류 변경에 따른 순환 구간 (없으면 시작일부터 진행 중인 카테고리) */
+  rotations?: Rotation[];
   curricula: Record<string, Curriculum | null>;
   posts: Post[];
   today: string;
@@ -30,12 +34,7 @@ type Input = {
   to: string;
 };
 
-export function topicForDateIn(startDate: string, topics: Topic[], date: string): Topic | null {
-  if (!topics.length || date < startDate) return null;
-  return topics[daysBetween(startDate, date) % topics.length];
-}
-
-export function buildSchedule({ startDate, topics, curricula, posts, today, from, to }: Input): DayPlan[] {
+export function buildSchedule({ startDate, topics, rotations, curricula, posts, today, from, to }: Input): DayPlan[] {
   const postByDate = new Map<string, Post>();
   for (const p of [...posts].sort((a, b) => a.slug.localeCompare(b.slug))) if (!postByDate.has(p.date)) postByDate.set(p.date, p);
 
@@ -50,7 +49,8 @@ export function buildSchedule({ startDate, topics, curricula, posts, today, from
   const used = new Set(posts.filter((p) => p.lesson).map((p) => `${p.topic}:${p.lesson}`));
   // 오늘 이후로 날짜가 고정된 레슨. (고정 날짜가 지났는데 못 쓴 레슨은 일반 레슨처럼 다음 차례에 배정)
   const pinned = new Map<string, { topic: Topic; id: string }>();
-  for (const t of topics) {
+  // 보류 중인 카테고리의 고정 레슨(대회 당일 등)은 배정하지 않습니다.
+  for (const t of topics.filter((t) => !t.paused)) {
     for (const l of lessonsByTopic.get(t.slug) ?? []) {
       if (l.date && l.date >= today && !used.has(`${t.slug}:${l.id}`) && !pinned.has(l.date)) pinned.set(l.date, { topic: t, id: l.id });
     }
@@ -67,7 +67,7 @@ export function buildSchedule({ startDate, topics, curricula, posts, today, from
   const first = from < startDate ? from : startDate;
   for (let date = first; date <= to; date = addDays(date, 1)) {
     const post = postByDate.get(date);
-    const rotation = topicForDateIn(startDate, topics, date);
+    const rotation = rotationTopic({ startDate, topics, rotations }, date);
     let plan: DayPlan;
 
     if (post) {
